@@ -165,7 +165,7 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
 
             // Przyciski wyboru typu zagrożenia
             const Text(
-              'SYGNATURA ZAGROŻENIA:',
+              'RODZAJ ZAGROŻENIA:',
               style: TextStyle(color: Colors.white54, fontSize: 11, letterSpacing: 1.2),
             ),
             const SizedBox(height: 8),
@@ -179,7 +179,7 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
               enabled: !_isBroadcasting,
               style: const TextStyle(color: Colors.white, fontSize: 13),
               decoration: InputDecoration(
-                labelText: 'MELDUNEK TAKTYCZNY',
+                labelText: 'OPIS ZAGROŻENIA',
                 labelStyle: const TextStyle(color: Colors.white38, fontSize: 11),
                 filled: true,
                 fillColor: const Color(0xFF161B22),
