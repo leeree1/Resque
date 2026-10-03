@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "523086236367",
+    "project_id": "resque-hyeah2026",
+    "storage_bucket": "resque-hyeah2026.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:523086236367:android:76148c21d32e30778d05ba",
+        "android_client_info": {
+          "package_name": "com.example.resque"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA_w0N-HdWv9DADKQOWPvBFgkPUIlx0WN4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
