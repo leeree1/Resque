@@ -1,9 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/sos_packet.dart';
 import '../services/mesh_engine.dart';
 
 class RelayMonitorScreen extends StatelessWidget {
   const RelayMonitorScreen({super.key});
+
+  Future<void> _copyLocation(BuildContext context, String? location) async {
+    String message;
+    if (location == null) {
+      message = 'To zgłoszenie nie zawiera lokalizacji.';
+    } else {
+      try {
+        await Clipboard.setData(ClipboardData(text: location));
+        message = 'Skopiowano współrzędne: $location';
+      } catch (_) {
+        message = 'Nie udało się skopiować współrzędnych. Spróbuj ponownie.';
+      }
+    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 
   String _requestTitle(SosPacket packet) {
     if (!packet.shareType) return 'Osoba potrzebująca pomocy';
@@ -68,6 +87,7 @@ class RelayMonitorScreen extends StatelessWidget {
                         ),
                       ),
                       child: ListTile(
+                        onTap: () => _copyLocation(context, location),
                         leading: const CircleAvatar(
                           backgroundColor: Colors.redAccent,
                           child: Icon(Icons.warning, color: Colors.white),
@@ -85,6 +105,8 @@ class RelayMonitorScreen extends StatelessWidget {
                                 pkt.message.trim().isNotEmpty)
                               pkt.message.trim(),
                             if (location != null) 'Lokalizacja: $location',
+                            if (location != null)
+                              'Dotknij, aby skopiować współrzędne',
                           ].join('\n'),
                           style: const TextStyle(color: Colors.white70),
                         ),
