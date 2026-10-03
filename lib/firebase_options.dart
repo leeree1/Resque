@@ -55,6 +55,7 @@ class DefaultFirebaseOptions {
     appId: '1:523086236367:android:76148c21d32e30778d05ba',
     messagingSenderId: '523086236367',
     projectId: 'resque-hyeah2026',
+    databaseURL: 'https://resque-hyeah2026-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: 'resque-hyeah2026.firebasestorage.app',
   );
 
