@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'firebase_options.dart';
 import 'screens/sos_broadcast_screen.dart';
 import 'screens/relay_monitor_screen.dart';
 import 'screens/radar_screen.dart';
@@ -7,12 +9,19 @@ import 'screens/map_offline_screen.dart';
 import 'screens/first_aid_screen.dart';
 import 'services/mesh_engine.dart';
 import 'services/nearby_mesh_service.dart';
+import 'services/firebase_sync_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   MeshNodeService();
   runApp(const ResqueApp());
   unawaited(NearbyMeshService().start());
+
+  // Okresowa synchronizacja bufora z Firebase (co 60 s)
+  Timer.periodic(const Duration(minutes: 1), (_) {
+    FirebaseSyncService.trySyncInBackground();
+  });
 }
 
 class ResqueApp extends StatelessWidget {

@@ -59,7 +59,6 @@ void main() {
 
     await MeshNodeService().onPacketReceivedFromPeer(
       jsonEncode(packet.toJson()),
-      relay: false,
     );
     await tester.pumpAndSettle();
 
