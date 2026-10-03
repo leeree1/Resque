@@ -70,10 +70,7 @@ class _TacticalRootNavigationState extends State<TacticalRootNavigation> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
-      ),
+      body: IndexedStack(index: _currentIndex, children: _screens),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           border: Border(top: BorderSide(color: Color(0xFF30363D), width: 1)),
@@ -106,8 +103,14 @@ class _TacticalRootNavigationState extends State<TacticalRootNavigation> {
               label: 'SZTAB',
             ),
             NavigationDestination(
-              icon: Icon(Icons.medical_services_outlined, color: Colors.white60),
-              selectedIcon: Icon(Icons.medical_services, color: Colors.redAccent),
+              icon: Icon(
+                Icons.medical_services_outlined,
+                color: Colors.white60,
+              ),
+              selectedIcon: Icon(
+                Icons.medical_services,
+                color: Colors.redAccent,
+              ),
               label: 'APTECZKA',
             ),
           ],
