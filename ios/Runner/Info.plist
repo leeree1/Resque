@@ -49,6 +49,8 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Pozycja jest dołączana do SOS tylko wtedy, gdy sam ją zaznaczysz. System używa jej też, żeby znaleźć inną aplikację Resque w zasięgu.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

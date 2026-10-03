@@ -1,7 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'models/sos_packet.dart';
 import 'screens/sos_broadcast_screen.dart';
+import 'screens/sos_incoming_screen.dart';
 import 'screens/relay_monitor_screen.dart';
 import 'screens/radar_screen.dart';
+import 'services/mesh_engine.dart';
+import 'services/nearby_mesh_service.dart';
 
 void main() {
   runApp(const ResqueApp());
@@ -15,6 +21,9 @@ class ResqueApp extends StatefulWidget {
 }
 
 class _ResqueAppState extends State<ResqueApp> {
+  final _navKey = GlobalKey<NavigatorState>();
+  final _shownPacketIds = <String>{};
+  late final StreamSubscription<SosPacket> _peerSub;
   int _currentIndex = 0;
 
   final List<Widget> _screens = const [
@@ -24,8 +33,42 @@ class _ResqueAppState extends State<ResqueApp> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _peerSub = MeshNodeService().peerAlerts.listen(_onPeerAlert);
+    unawaited(NearbyMeshService().start());
+  }
+
+  @override
+  void dispose() {
+    _peerSub.cancel();
+    super.dispose();
+  }
+
+  void _onPeerAlert(SosPacket packet) {
+    if (!_shownPacketIds.add(packet.id)) return;
+
+    void open() {
+      if (!mounted) return;
+      _navKey.currentState?.push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => SosIncomingScreen(packet: packet),
+        ),
+      );
+    }
+
+    if (_navKey.currentState == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => open());
+    } else {
+      open();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navKey,
       title: 'Resque',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(

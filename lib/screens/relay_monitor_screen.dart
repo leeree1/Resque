@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../models/sos_packet.dart';
 import '../services/mesh_engine.dart';
+import '../widgets/sos_packet_view.dart';
 
 class RelayMonitorScreen extends StatelessWidget {
   const RelayMonitorScreen({super.key});
@@ -18,7 +19,10 @@ class RelayMonitorScreen extends StatelessWidget {
       hopCount: 1,
     );
 
-    MeshNodeService().onPacketReceivedFromPeer(jsonEncode(fakePacket.toJson()));
+    MeshNodeService().onPacketReceivedFromPeer(
+      jsonEncode(fakePacket.toJson()),
+      relay: false,
+    );
   }
 
   @override
@@ -33,15 +37,16 @@ class RelayMonitorScreen extends StatelessWidget {
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.cloud_upload_outlined, color: Colors.greenAccent),
-            tooltip: 'Wypchnij do serwera (Złapano sieć)',
+            icon: const Icon(Icons.delete_outline, color: Colors.white54),
+            tooltip: 'Wyczyść lokalną listę',
             onPressed: () async {
-              await mesh.flushToCentralServer();
+              await mesh.clearLocalBuffer();
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    backgroundColor: Colors.green,
-                    content: Text('Zsynchronizowano pakiety z centralnym serwerem ratunkowym!'),
+                    content: Text(
+                      'Wyczyszczono listę na tym telefonie. Nikomu nie wysłano powiadomienia.',
+                    ),
                   ),
                 );
               }
@@ -51,7 +56,7 @@ class RelayMonitorScreen extends StatelessWidget {
       ),
       body: StreamBuilder<List<SosPacket>>(
         stream: mesh.packetsStream,
-        initialData: const [],
+        initialData: mesh.getAllPackets(),
         builder: (context, snapshot) {
           final packets = snapshot.data ?? [];
 
@@ -90,7 +95,7 @@ class RelayMonitorScreen extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Pakiety w buforze: ${packets.length}. Zostaną przesłane do służb, gdy którykolwiek węzeł złapie zasięg.',
+                        'Pakiety w tej aplikacji: ${packets.length}. Widzą je tylko telefony z Resque, które są w zasięgu.',
                         style: const TextStyle(fontSize: 12, color: Colors.white70),
                       ),
                     ),
@@ -142,21 +147,8 @@ class RelayMonitorScreen extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(pkt.message, style: const TextStyle(color: Colors.white70, fontSize: 13)),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.location_on, size: 14, color: Colors.redAccent),
-              const SizedBox(width: 4),
-              Text('${pkt.latitude.toStringAsFixed(4)}, ${pkt.longitude.toStringAsFixed(4)}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
-              const Spacer(),
-              Text(
-                '${pkt.timestamp.hour.toString().padLeft(2, '0')}:${pkt.timestamp.minute.toString().padLeft(2, '0')}',
-                style: const TextStyle(color: Colors.white38, fontSize: 11),
-              ),
-            ],
-          ),
+          const SizedBox(height: 10),
+          SosPacketView(packet: pkt, dense: true),
         ],
       ),
     );

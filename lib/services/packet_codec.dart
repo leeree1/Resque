@@ -6,8 +6,8 @@ class PacketCodec {
       packet.id,
       packet.senderName,
       packet.type.index,
-      packet.latitude.toStringAsFixed(5),
-      packet.longitude.toStringAsFixed(5),
+      packet.latitude?.toStringAsFixed(5) ?? '',
+      packet.longitude?.toStringAsFixed(5) ?? '',
       packet.hopCount,
       packet.message.replaceAll('|', ' '),
     ].join('|');
