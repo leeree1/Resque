@@ -1,9 +1,6 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import '../models/sos_packet.dart';
-import '../services/firebase_sync_service.dart';
 import '../services/mesh_engine.dart';
-import '../services/nearby_mesh_service.dart';
 
 enum SafePointType { evacuation, fireStation, medical, shelter }
 
@@ -82,10 +79,6 @@ class MapOfflineScreen extends StatefulWidget {
 class _MapOfflineScreenState extends State<MapOfflineScreen> {
   int _tabIndex = 0; // 0 - Punkty bezpieczne, 1 - Zgłoszenia SOS
 
-  // Strumień tworzony raz — inaczej StreamBuilder przy każdym rebuildzie
-  // zakładałby nową subskrypcję i zapętlał animację.
-  late final Stream<List<SosPacket>> _sosStream = FirebaseSyncService.watchAllSos();
-
   // Stała baza punktów awaryjnych (współrzędne lokalne)
   final List<TacticalSafePoint> _safePoints = const [
     TacticalSafePoint(
@@ -150,7 +143,11 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
             Expanded(
               child: Text(
                 pt.name,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
               ),
             ),
           ],
@@ -159,10 +156,23 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('TYP: ${pt.typeLabel}', style: TextStyle(color: pt.color, fontSize: 11, fontWeight: FontWeight.bold)),
+            Text(
+              'TYP: ${pt.typeLabel}',
+              style: TextStyle(
+                color: pt.color,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 6),
-            Text('Lokalizacja: ${pt.address}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-            Text(pt.capacity, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            Text(
+              'Lokalizacja: ${pt.address}',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            Text(
+              pt.capacity,
+              style: const TextStyle(color: Colors.white54, fontSize: 11),
+            ),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
@@ -179,9 +189,26 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('AZYMUT MARSZU OFFLINE', style: TextStyle(color: Colors.cyanAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-                        Text('Kierunek: 035° (Północny-Wschód)', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                        Text('Szacowany dystans: ok. 850 metrów', style: TextStyle(color: Colors.white60, fontSize: 11)),
+                        Text(
+                          'AZYMUT MARSZU OFFLINE',
+                          style: TextStyle(
+                            color: Colors.cyanAccent,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Kierunek: 035° (Północny-Wschód)',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Szacowany dystans: ok. 850 metrów',
+                          style: TextStyle(color: Colors.white60, fontSize: 11),
+                        ),
                       ],
                     ),
                   ),
@@ -193,7 +220,10 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('ZAMKNIJ', style: TextStyle(color: Colors.white60)),
+            child: const Text(
+              'ZAMKNIJ',
+              style: TextStyle(color: Colors.white60),
+            ),
           ),
         ],
       ),
@@ -209,17 +239,25 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
         elevation: 0,
         title: const Row(
           children: [
-            Icon(Icons.satellite_alt_outlined, color: Colors.amberAccent, size: 20),
+            Icon(
+              Icons.satellite_alt_outlined,
+              color: Colors.amberAccent,
+              size: 20,
+            ),
             SizedBox(width: 8),
             Text(
               'TAKTYCZNY SZTAB MESH',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.5,
+              ),
             ),
           ],
         ),
       ),
       body: StreamBuilder<List<SosPacket>>(
-        stream: _sosStream,
+        stream: MeshNodeService().packetsStream,
         initialData: MeshNodeService().getAllPackets(),
         builder: (context, snapshot) {
           final packets = snapshot.data ?? [];
@@ -246,7 +284,10 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                           height: 170,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white10, width: 1.5),
+                            border: Border.all(
+                              color: Colors.white10,
+                              width: 1.5,
+                            ),
                           ),
                         ),
                       ),
@@ -256,12 +297,19 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                           height: 90,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.amberAccent.withOpacity(0.3), width: 1.5),
+                            border: Border.all(
+                              color: Colors.amberAccent.withOpacity(0.3),
+                              width: 1.5,
+                            ),
                           ),
                         ),
                       ),
                       const Center(
-                        child: Icon(Icons.my_location, color: Colors.cyanAccent, size: 26),
+                        child: Icon(
+                          Icons.my_location,
+                          color: Colors.cyanAccent,
+                          size: 26,
+                        ),
                       ),
 
                       // Punkty Bezpieczne (Bazy / Szpitale / Straż / Ewakuacja)
@@ -279,20 +327,34 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                                     color: pt.color,
                                     shape: BoxShape.circle,
                                     boxShadow: [
-                                      BoxShadow(color: pt.color.withOpacity(0.6), blurRadius: 6),
+                                      BoxShadow(
+                                        color: pt.color.withOpacity(0.6),
+                                        blurRadius: 6,
+                                      ),
                                     ],
                                   ),
-                                  child: Icon(pt.icon, size: 12, color: Colors.black),
+                                  child: Icon(
+                                    pt.icon,
+                                    size: 12,
+                                    color: Colors.black,
+                                  ),
                                 ),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 3,
+                                    vertical: 1,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: Colors.black87,
                                     borderRadius: BorderRadius.circular(3),
                                   ),
                                   child: Text(
                                     pt.id,
-                                    style: TextStyle(fontSize: 8, color: pt.color, fontWeight: FontWeight.bold),
+                                    style: TextStyle(
+                                      fontSize: 8,
+                                      color: pt.color,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -314,11 +376,18 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                                   color: Color(0xFFFF2A4B),
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(Icons.warning_amber, size: 12, color: Colors.white),
+                                child: const Icon(
+                                  Icons.warning_amber,
+                                  size: 12,
+                                  color: Colors.white,
+                                ),
                               ),
                               Text(
                                 p.id,
-                                style: const TextStyle(fontSize: 8, color: Colors.white70),
+                                style: const TextStyle(
+                                  fontSize: 8,
+                                  color: Colors.white70,
+                                ),
                               ),
                             ],
                           ),
@@ -330,7 +399,10 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                         left: 12,
                         child: Text(
                           'PUNKTY BEZPIECZNE: ${_safePoints.length} • AKTYWNE SOS: ${packets.length}',
-                          style: const TextStyle(fontSize: 9, color: Colors.white38),
+                          style: const TextStyle(
+                            fontSize: 9,
+                            color: Colors.white38,
+                          ),
                         ),
                       ),
                     ],
@@ -340,7 +412,10 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
 
               // Przełącznik zakładek (Bezpieczne bazy vs Zgłoszenia SOS)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
                 child: Row(
                   children: [
                     Expanded(
@@ -349,10 +424,14 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           decoration: BoxDecoration(
-                            color: _tabIndex == 0 ? Colors.cyanAccent.withOpacity(0.15) : const Color(0xFF161B22),
+                            color: _tabIndex == 0
+                                ? Colors.cyanAccent.withOpacity(0.15)
+                                : const Color(0xFF161B22),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: _tabIndex == 0 ? Colors.cyanAccent : const Color(0xFF30363D),
+                              color: _tabIndex == 0
+                                  ? Colors.cyanAccent
+                                  : const Color(0xFF30363D),
                             ),
                           ),
                           child: Center(
@@ -361,7 +440,9 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
-                                color: _tabIndex == 0 ? Colors.cyanAccent : Colors.white60,
+                                color: _tabIndex == 0
+                                    ? Colors.cyanAccent
+                                    : Colors.white60,
                               ),
                             ),
                           ),
@@ -375,10 +456,14 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           decoration: BoxDecoration(
-                            color: _tabIndex == 1 ? const Color(0xFFFF2A4B).withOpacity(0.15) : const Color(0xFF161B22),
+                            color: _tabIndex == 1
+                                ? const Color(0xFFFF2A4B).withOpacity(0.15)
+                                : const Color(0xFF161B22),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: _tabIndex == 1 ? const Color(0xFFFF2A4B) : const Color(0xFF30363D),
+                              color: _tabIndex == 1
+                                  ? const Color(0xFFFF2A4B)
+                                  : const Color(0xFF30363D),
                             ),
                           ),
                           child: Center(
@@ -387,7 +472,9 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
-                                color: _tabIndex == 1 ? const Color(0xFFFF2A4B) : Colors.white60,
+                                color: _tabIndex == 1
+                                    ? const Color(0xFFFF2A4B)
+                                    : Colors.white60,
                               ),
                             ),
                           ),
@@ -414,7 +501,9 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                             decoration: BoxDecoration(
                               color: const Color(0xFF161B22),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFF30363D)),
+                              border: Border.all(
+                                color: const Color(0xFF30363D),
+                              ),
                             ),
                             child: Row(
                               children: [
@@ -424,25 +513,40 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                                     color: pt.color.withOpacity(0.15),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: Icon(pt.icon, color: pt.color, size: 22),
+                                  child: Icon(
+                                    pt.icon,
+                                    color: pt.color,
+                                    size: 22,
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         pt.name,
-                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
                                       ),
                                       Text(
                                         pt.address,
-                                        style: const TextStyle(color: Colors.white54, fontSize: 11),
+                                        style: const TextStyle(
+                                          color: Colors.white54,
+                                          fontSize: 11,
+                                        ),
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
                                         pt.capacity,
-                                        style: TextStyle(color: pt.color, fontSize: 10),
+                                        style: TextStyle(
+                                          color: pt.color,
+                                          fontSize: 10,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -452,14 +556,23 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: pt.color.withOpacity(0.2),
                                     foregroundColor: pt.color,
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(8),
                                       side: BorderSide(color: pt.color),
                                     ),
                                   ),
                                   icon: const Icon(Icons.navigation, size: 14),
-                                  label: const Text('PROWADŹ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                  label: const Text(
+                                    'PROWADŹ',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
@@ -467,74 +580,99 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
                         },
                       )
                     : packets.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'Brak odebranych celów SOS w buforze',
-                              style: TextStyle(color: Colors.white38),
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            itemCount: packets.length,
-                            itemBuilder: (context, index) {
-                              final p = packets[index];
-                              final lat = p.latitude?.toStringAsFixed(4) ?? 'n/a';
-                              final lng = p.longitude?.toStringAsFixed(4) ?? 'n/a';
+                    ? const Center(
+                        child: Text(
+                          'Brak odebranych celów SOS w buforze',
+                          style: TextStyle(color: Colors.white38),
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: packets.length,
+                        itemBuilder: (context, index) {
+                          final p = packets[index];
+                          final lat = p.latitude?.toStringAsFixed(4) ?? 'n/a';
+                          final lng = p.longitude?.toStringAsFixed(4) ?? 'n/a';
 
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 10),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF161B22),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: const Color(0xFFFF2A4B).withOpacity(0.4)),
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF161B22),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFFFF2A4B).withOpacity(0.4),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(
+                                      0xFFFF2A4B,
+                                    ).withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(
+                                    Icons.location_on,
+                                    color: Color(0xFFFF2A4B),
+                                  ),
                                 ),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFFF2A4B).withOpacity(0.15),
-                                        borderRadius: BorderRadius.circular(8),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        p.senderName,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
-                                      child: const Icon(Icons.location_on, color: Color(0xFFFF2A4B)),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            p.senderName,
-                                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                          ),
-                                          Text(
-                                            'GPS: $lat, $lng',
-                                            style: const TextStyle(color: Colors.amberAccent, fontSize: 11),
-                                          ),
-                                          Text(
-                                            p.message,
-                                            style: const TextStyle(color: Colors.white60, fontSize: 11),
-                                          ),
-                                        ],
+                                      Text(
+                                        'GPS: $lat, $lng',
+                                        style: const TextStyle(
+                                          color: Colors.amberAccent,
+                                          fontSize: 11,
+                                        ),
                                       ),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        border: Border.all(color: Colors.cyanAccent),
-                                        borderRadius: BorderRadius.circular(6),
+                                      Text(
+                                        p.message,
+                                        style: const TextStyle(
+                                          color: Colors.white60,
+                                          fontSize: 11,
+                                        ),
                                       ),
-                                      child: Text(
-                                        'SKOK ${p.hopCount}',
-                                        style: const TextStyle(color: Colors.cyanAccent, fontSize: 10),
-                                      ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              );
-                            },
-                          ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                      color: Colors.cyanAccent,
+                                    ),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'SKOK ${p.hopCount}',
+                                    style: const TextStyle(
+                                      color: Colors.cyanAccent,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
               ),
             ],
           );
