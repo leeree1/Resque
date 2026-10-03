@@ -7,13 +7,18 @@ import 'package:permission_handler/permission_handler.dart';
 import '../models/sos_packet.dart';
 import 'offline_storage.dart';
 
+enum MeshRole { auto, advertiserOnly, discovererOnly }
+
 class NearbyMeshService extends ChangeNotifier {
   static final NearbyMeshService _instance = NearbyMeshService._internal();
   factory NearbyMeshService() => _instance;
   NearbyMeshService._internal();
 
-  final Strategy strategy = Strategy.P2P_CLUSTER;
-  static const String serviceId = "com.example.resque.sos";
+  // Zmiana na P2P_STAR eliminuje zawieszanie anteny radiowej na wielu procesorach
+  final Strategy strategy = Strategy.P2P_STAR;
+
+  // Nowy identyfikator unieważnia zawieszone w tle sesje Google Nearby
+  static const String serviceId = "com.resque.emergency.mesh.v3";
 
   bool _isStarted = false;
   bool _needsSettings = false;
@@ -41,7 +46,7 @@ class NearbyMeshService extends ChangeNotifier {
     await openAppSettings();
   }
 
-  Future<void> start() async {
+  Future<void> start({MeshRole role = MeshRole.auto}) async {
     if (kIsWeb) {
       _statusMessage = "Web: Symulacja BLE (brak sprzętowego Nearby)";
       notifyListeners();
@@ -51,8 +56,9 @@ class NearbyMeshService extends ChangeNotifier {
     if (_isStarted) return;
     _isStarted = true;
 
-    final nodeName = "Resque_${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
-    await startMeshNode(nodeName: nodeName);
+    final randomSuffix = DateTime.now().microsecondsSinceEpoch.toString().substring(9);
+    final nodeName = "Resque_$randomSuffix";
+    await startMeshNode(nodeName: nodeName, role: role);
   }
 
   Future<bool> checkAndRequestPermissions() async {
@@ -71,7 +77,7 @@ class NearbyMeshService extends ChangeNotifier {
 
     if (isDenied) {
       _needsSettings = true;
-      _statusMessage = "Wymagane uprawnienia Bluetooth/Lokalizacji w ustawieniach.";
+      _statusMessage = "Wymagane uprawnienia Bluetooth/Lokalizacji w Ustawieniach.";
       notifyListeners();
       return false;
     }
@@ -79,92 +85,116 @@ class NearbyMeshService extends ChangeNotifier {
     return true;
   }
 
-  Future<void> startMeshNode({required String nodeName}) async {
+  Future<void> startMeshNode({
+    required String nodeName,
+    MeshRole role = MeshRole.auto,
+  }) async {
     if (kIsWeb) return;
 
     final permsGranted = await checkAndRequestPermissions();
     if (!permsGranted) return;
 
+    // Twardy reset poprzednich sesji i krótka pauza na zwolnienie zasobów radiowych
     try {
+      await Nearby().stopAllEndpoints();
       await Nearby().stopAdvertising();
       await Nearby().stopDiscovery();
-      await Nearby().stopAllEndpoints();
+      await Future.delayed(const Duration(milliseconds: 350));
     } catch (_) {}
 
     _connectedEndpoints.clear();
     _connectingEndpoints.clear();
     _discoveredEndpoints.clear();
 
-    // 1. Nadawanie (Advertising)
-    try {
-      await Nearby().startAdvertising(
-        nodeName,
-        strategy,
-        onConnectionInitiated: _onConnectionInitiated,
-        onConnectionResult: _onConnectionResult,
-        onDisconnected: (id) {
-          _connectedEndpoints.remove(id);
-          _connectingEndpoints.remove(id);
-          _statusMessage = "Rozłączono węzeł $id";
-          notifyListeners();
-        },
-        serviceId: serviceId,
-      );
-      _statusMessage = "Nadawanie aktywne (P2P_CLUSTER)";
-    } catch (e) {
-      _statusMessage = "Status nadawania: $e";
+    // 1. Nadawanie (Advertising) - pomijane, jeśli wymuszono tylko odbiór
+    if (role != MeshRole.discovererOnly) {
+      try {
+        await Nearby().startAdvertising(
+          nodeName,
+          strategy,
+          onConnectionInitiated: _onConnectionInitiated,
+          onConnectionResult: _onConnectionResult,
+          onDisconnected: (id) {
+            _connectedEndpoints.remove(id);
+            _connectingEndpoints.remove(id);
+            _statusMessage = "Rozłączono z $id";
+            notifyListeners();
+          },
+          serviceId: serviceId,
+        );
+        _statusMessage = "Nadawanie aktywne ($nodeName)";
+      } catch (e) {
+        if (e.toString().contains("8001")) {
+          debugPrint("Nearby: Kod 8001 (nadawanie w toku) - kontynuuję.");
+        } else {
+          _statusMessage = "Status nadawania: $e";
+        }
+      }
     }
 
-    // 2. Odkrywanie (Discovery)
-    try {
-      await Nearby().startDiscovery(
-        nodeName,
-        strategy,
-        onEndpointFound: (endpointId, name, sId) async {
-          _discoveredEndpoints.add(endpointId);
-          _statusMessage = "Wykryto węzeł $name ($endpointId)";
-          notifyListeners();
+    // 2. Odkrywanie (Discovery) - pomijane, jeśli wymuszono tylko nadawanie
+    if (role != MeshRole.advertiserOnly) {
+      try {
+        await Nearby().startDiscovery(
+          nodeName,
+          strategy,
+          onEndpointFound: (endpointId, name, sId) async {
+            debugPrint("Nearby: ZNALEZIONO WĘZEŁ $name ($endpointId)");
+            _discoveredEndpoints.add(endpointId);
+            _statusMessage = "Wykryto węzeł: $name";
+            notifyListeners();
 
-          if (_connectedEndpoints.contains(endpointId) ||
-              _connectingEndpoints.contains(endpointId)) {
-            return;
-          }
-
-          if (nodeName.compareTo(name) > 0) {
-            _connectingEndpoints.add(endpointId);
-            try {
-              await Nearby().requestConnection(
-                nodeName,
-                endpointId,
-                onConnectionInitiated: _onConnectionInitiated,
-                onConnectionResult: _onConnectionResult,
-                onDisconnected: (id) {
-                  _connectedEndpoints.remove(id);
-                  _connectingEndpoints.remove(id);
-                  notifyListeners();
-                },
-              );
-            } catch (e) {
-              _connectingEndpoints.remove(endpointId);
+            if (_connectedEndpoints.contains(endpointId) ||
+                _connectingEndpoints.contains(endpointId)) {
+              return;
             }
-          }
-        },
-        onEndpointLost: (id) {
-          _discoveredEndpoints.remove(id);
-          _connectingEndpoints.remove(id);
-          _connectedEndpoints.remove(id);
-          notifyListeners();
-        },
-        serviceId: serviceId,
-      );
-    } catch (e) {
-      _statusMessage = "Status odkrywania: $e";
+
+            // W trybie auto: asymetria nazw zapobiega konfliktom 8003
+            // W trybie discovererOnly: zawsze inicjuje połączenie
+            final shouldConnect = (role == MeshRole.discovererOnly) || (nodeName.compareTo(name) > 0);
+
+            if (shouldConnect) {
+              _connectingEndpoints.add(endpointId);
+              debugPrint("Nearby: Wysyłam prośbę o połączenie do $name...");
+              try {
+                await Nearby().requestConnection(
+                  nodeName,
+                  endpointId,
+                  onConnectionInitiated: _onConnectionInitiated,
+                  onConnectionResult: _onConnectionResult,
+                  onDisconnected: (id) {
+                    _connectedEndpoints.remove(id);
+                    _connectingEndpoints.remove(id);
+                    notifyListeners();
+                  },
+                );
+              } catch (e) {
+                _connectingEndpoints.remove(endpointId);
+                debugPrint("Błąd requestConnection: $e");
+              }
+            }
+          },
+          onEndpointLost: (id) {
+            _discoveredEndpoints.remove(id);
+            _connectingEndpoints.remove(id);
+            _connectedEndpoints.remove(id);
+            notifyListeners();
+          },
+          serviceId: serviceId,
+        );
+        if (role == MeshRole.discovererOnly) {
+          _statusMessage = "Nasłuch SOS aktywny...";
+        }
+      } catch (e) {
+        _statusMessage = "Błąd discovery: $e";
+      }
     }
 
     notifyListeners();
   }
 
   void _onConnectionInitiated(String endpointId, ConnectionInfo info) async {
+    debugPrint("Nearby: Inicjacja połączenia z ${info.endpointName} ($endpointId)");
     try {
       await Nearby().acceptConnection(
         endpointId,
@@ -184,9 +214,11 @@ class NearbyMeshService extends ChangeNotifier {
 
     if (status == Status.CONNECTED) {
       _connectedEndpoints.add(endpointId);
-      _statusMessage = "Połączono z węzłem $endpointId";
+      _statusMessage = "POŁĄCZONO Z WĘZŁEM!";
+      debugPrint("Nearby: Połączono z $endpointId");
     } else {
       _connectedEndpoints.remove(endpointId);
+      _statusMessage = "Nie udało się połączyć ($status)";
     }
     notifyListeners();
   }
@@ -199,7 +231,7 @@ class NearbyMeshService extends ChangeNotifier {
     _processedPacketIds.add(packet.id);
 
     if (_connectedEndpoints.isEmpty) {
-      _statusMessage = "Brak węzłów w zasięgu direct. Pakiet czeka w kolejce.";
+      _statusMessage = "Brak aktywnych połączeń. Pakiet zbuforowany.";
       notifyListeners();
       return;
     }
@@ -215,7 +247,7 @@ class NearbyMeshService extends ChangeNotifier {
       final bytes = Uint8List.fromList(utf8.encode(jsonString));
       await Nearby().sendBytesPayload(endpointId, bytes);
       _deliveryCounts[packet.id] = (_deliveryCounts[packet.id] ?? 0) + 1;
-      _statusMessage = "Dostarczono pakiet ${packet.id} do węzła $endpointId";
+      _statusMessage = "Wysłano SOS do węzła $endpointId";
       notifyListeners();
     } catch (e) {
       debugPrint("Błąd sendBytesPayload: $e");
@@ -234,20 +266,21 @@ class NearbyMeshService extends ChangeNotifier {
       packet.hopCount += 1;
       await OfflineStorage.savePacket(packet);
 
-      _statusMessage = "Odebrano SOS: ${packet.senderName} (skok: ${packet.hopCount})";
+      _statusMessage = "ODEBRANO SOS: ${packet.senderName} (skok: ${packet.hopCount})";
       notifyListeners();
 
       if (_incomingCallback != null) {
         _incomingCallback!(raw);
       }
 
+      // Podaj dalej pakiet (Mesh Relay)
       for (final endpointId in _connectedEndpoints.toList()) {
         if (endpointId != sourceEndpointId) {
           await _sendPacketToEndpoint(endpointId, packet);
         }
       }
     } catch (e) {
-      debugPrint("Błąd przetwarzania odebranego pakietu: $e");
+      debugPrint("Błąd przetwarzania pakietu: $e");
     }
   }
 
