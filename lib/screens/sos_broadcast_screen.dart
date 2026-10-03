@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../models/sos_packet.dart';
+import '../services/emergency_alert_service.dart';
 import '../services/mesh_engine.dart';
+import '../services/packet_codec.dart';
 
 class SosBroadcastScreen extends StatefulWidget {
   const SosBroadcastScreen({super.key});
@@ -11,16 +14,39 @@ class SosBroadcastScreen extends StatefulWidget {
   State<SosBroadcastScreen> createState() => _SosBroadcastScreenState();
 }
 
-class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
+class _SosBroadcastScreenState extends State<SosBroadcastScreen>
+    with SingleTickerProviderStateMixin {
   EmergencyType _selectedType = EmergencyType.medical;
   bool _isBroadcasting = false;
   bool _isLoadingGps = false;
+  SosPacket? _activePacket;
+
   final int _nearbyRelaysFound = 3;
-  final _noteController = TextEditingController(text: 'Potrzebna pomoc medyczna i woda');
+  final _noteController =
+      TextEditingController(text: 'Potrzebna pomoc medyczna i woda');
+
+  late AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..addStatusListener((status) {
+        if (status == AnimationStatus.completed) {
+          _pulseController.reverse();
+        } else if (status == AnimationStatus.dismissed) {
+          _pulseController.forward();
+        }
+      });
+  }
 
   @override
   void dispose() {
+    _pulseController.dispose();
     _noteController.dispose();
+    EmergencyAlertService().stopAlarm();
     super.dispose();
   }
 
@@ -47,7 +73,12 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
 
   void _triggerSos() async {
     if (_isBroadcasting) {
-      setState(() => _isBroadcasting = false);
+      EmergencyAlertService().stopAlarm();
+      _pulseController.stop();
+      setState(() {
+        _isBroadcasting = false;
+        _activePacket = null;
+      });
       return;
     }
 
@@ -64,11 +95,6 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
 
     if (!mounted) return;
 
-    setState(() {
-      _isLoadingGps = false;
-      _isBroadcasting = true;
-    });
-
     final packet = SosPacket(
       id: const Uuid().v4().substring(0, 8),
       senderName: 'Poszkodowany #A1',
@@ -80,12 +106,25 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
       hopCount: 0,
     );
 
-    MeshNodeService().broadcastMySos(packet);
+    // 1. Zapis do bazy offline i rozgłoszenie mesh
+    await MeshNodeService().broadcastMySos(packet);
+
+    // 2. Uruchomienie fizycznego alarmu i stroboskopu Morse'a
+    EmergencyAlertService().startAlarm();
+    _pulseController.forward();
+
+    setState(() {
+      _isLoadingGps = false;
+      _isBroadcasting = true;
+      _activePacket = packet;
+    });
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: Colors.redAccent,
-        content: Text('Sygnał SOS rozsyłany w sieci Mesh! GPS: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}'),
+        content: Text(
+          'ALARM AKTYWNY! Latarka nadaje SOS. Koordynaty: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}',
+        ),
       ),
     );
   }
@@ -101,41 +140,66 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
           children: [
             Icon(Icons.radar, color: Colors.redAccent),
             SizedBox(width: 8),
-            Text('Resque • Mesh SOS', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+            Text(
+              'Resque • Mesh SOS',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+            ),
           ],
         ),
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: AnimatedBuilder(
+          animation: _pulseController,
+          builder: (context, child) {
+            return Container(
+              decoration: BoxDecoration(
+                border: _isBroadcasting
+                    ? Border.all(
+                        color: Colors.redAccent
+                            .withOpacity(0.3 + 0.7 * _pulseController.value),
+                        width: 4,
+                      )
+                    : null,
+              ),
+              child: child,
+            );
+          },
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             children: [
               _buildNetworkStatusCard(),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
               const Text(
                 'Wybierz rodzaj zagrożenia:',
                 style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               _buildEmergencyChips(),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               TextField(
                 controller: _noteController,
+                enabled: !_isBroadcasting,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
                   labelText: 'Krótka informacja',
                   labelStyle: const TextStyle(color: Colors.white60),
                   filled: true,
                   fillColor: const Color(0xFF1E1E1E),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(height: 24),
               _buildBigSosButton(),
-              const Spacer(),
+              const SizedBox(height: 20),
+              if (_isBroadcasting && _activePacket != null) ...[
+                _buildNonAppUserCard(_activePacket!),
+                const SizedBox(height: 16),
+              ],
               _buildMeshNodesInfo(),
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -159,8 +223,17 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Tryb Offline (Brak GSM/Internetu)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                Text('Sygnał zostanie przekazany skokowo przez telefony w zasięgu BLE.', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                Text(
+                  'Tryb Offline (Brak GSM/Internetu)',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'Sygnał przekazywany przez BLE Mesh + stroboskop optyczny.',
+                  style: TextStyle(color: Colors.white54, fontSize: 12),
+                ),
               ],
             ),
           ),
@@ -186,7 +259,9 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
           label: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(item.$3, size: 16, color: isSelected ? Colors.white : Colors.white60),
+              Icon(item.$3,
+                  size: 16,
+                  color: isSelected ? Colors.white : Colors.white60),
               const SizedBox(width: 6),
               Text(item.$2),
             ],
@@ -194,10 +269,14 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
           selected: isSelected,
           selectedColor: Colors.redAccent,
           backgroundColor: const Color(0xFF1E1E1E),
-          labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.white70),
-          onSelected: (val) {
-            if (val) setState(() => _selectedType = item.$1);
-          },
+          labelStyle: TextStyle(
+            color: isSelected ? Colors.white : Colors.white70,
+          ),
+          onSelected: _isBroadcasting
+              ? null
+              : (val) {
+                  if (val) setState(() => _selectedType = item.$1);
+                },
         );
       }).toList(),
     );
@@ -209,16 +288,16 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
         onTap: _isLoadingGps ? null : _triggerSos,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 300),
-          width: 180,
-          height: 180,
+          width: 170,
+          height: 170,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: _isBroadcasting ? Colors.red.shade900 : Colors.redAccent,
             boxShadow: [
               BoxShadow(
-                color: Colors.redAccent.withOpacity(_isBroadcasting ? 0.7 : 0.3),
-                blurRadius: _isBroadcasting ? 35 : 15,
-                spreadRadius: _isBroadcasting ? 10 : 2,
+                color: Colors.redAccent.withOpacity(_isBroadcasting ? 0.8 : 0.3),
+                blurRadius: _isBroadcasting ? 40 : 15,
+                spreadRadius: _isBroadcasting ? 12 : 2,
               ),
             ],
           ),
@@ -229,19 +308,74 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        _isBroadcasting ? Icons.broadcast_on_personal : Icons.sos,
-                        size: 54,
+                        _isBroadcasting
+                            ? Icons.flashlight_on
+                            : Icons.sos,
+                        size: 50,
                         color: Colors.white,
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        _isBroadcasting ? 'NADAWANIE...' : 'WYŚLIJ SOS',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                        _isBroadcasting ? 'WYŁĄCZ ALARM' : 'WYŚLIJ SOS',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
                       ),
                     ],
                   ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildNonAppUserCard(SosPacket pkt) {
+    // Standardowy link Geo URI, który każdy zwykły telefon bez aplikacji otworzy w Mapach Google/Apple
+    final geoLink =
+        'geo:${pkt.latitude},${pkt.longitude}?q=${pkt.latitude},${pkt.longitude}(SOS+Pomoc)';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          const Text(
+            'DLA OSÓB BEZ APLIKACJI',
+            style: TextStyle(
+              color: Colors.redAccent,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              letterSpacing: 1.1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Skieruj dowolny aparat telefonu na poniższy kod:',
+            style: TextStyle(color: Colors.black87, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          QrImageView(
+            data: geoLink,
+            version: QrVersions.auto,
+            size: 160.0,
+            backgroundColor: Colors.white,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Pozycja: ${pkt.latitude.toStringAsFixed(4)}, ${pkt.longitude.toStringAsFixed(4)}\nLatarka miga sygnał SOS w alfabecie Morse\'a',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -256,14 +390,24 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Icon(Icons.bluetooth_searching, color: Colors.cyanAccent, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text('Pobliskie węzły przekaźnikowe: $_nearbyRelaysFound', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          Row(
+            children: [
+              const Icon(Icons.bluetooth_searching,
+                  color: Colors.cyanAccent, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Węzły przekaźnikowe w zasięgu: $_nearbyRelaysFound',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          const Flexible(
-            child: Text('Gotowy do skoku', textAlign: TextAlign.end, style: TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+          const Text(
+            'Gotowy do skoku',
+            style: TextStyle(
+              color: Colors.greenAccent,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),

@@ -38,6 +38,8 @@ dependencies:
   uuid: ^4.6.0
   connectivity_plus: ^7.3.2
   shared_preferences: ^2.5.5
+  torch_light: ^2.0.0
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:
