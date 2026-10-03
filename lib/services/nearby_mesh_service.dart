@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -32,7 +31,8 @@ class NearbyMeshService extends ChangeNotifier {
   void Function(String rawJson)? _incomingCallback;
 
   bool get isSupported => !kIsWeb;
-  int get peersInRange => _discoveredEndpoints.length + _connectedEndpoints.length;
+  int get peersInRange =>
+      _discoveredEndpoints.length + _connectedEndpoints.length;
   String get statusMessage => _statusMessage;
   bool get needsSettings => _needsSettings;
 
@@ -56,7 +56,9 @@ class NearbyMeshService extends ChangeNotifier {
     if (_isStarted) return;
     _isStarted = true;
 
-    final randomSuffix = DateTime.now().microsecondsSinceEpoch.toString().substring(9);
+    final randomSuffix = DateTime.now().microsecondsSinceEpoch
+        .toString()
+        .substring(9);
     final nodeName = "Resque_$randomSuffix";
     await startMeshNode(nodeName: nodeName, role: role);
   }
@@ -72,12 +74,14 @@ class NearbyMeshService extends ChangeNotifier {
       Permission.nearbyWifiDevices,
     ].request();
 
-    final isDenied = statuses[Permission.locationWhenInUse]?.isPermanentlyDenied == true ||
+    final isDenied =
+        statuses[Permission.locationWhenInUse]?.isPermanentlyDenied == true ||
         statuses[Permission.bluetoothScan]?.isPermanentlyDenied == true;
 
     if (isDenied) {
       _needsSettings = true;
-      _statusMessage = "Wymagane uprawnienia Bluetooth/Lokalizacji w Ustawieniach.";
+      _statusMessage =
+          "Wymagane uprawnienia Bluetooth/Lokalizacji w Ustawieniach.";
       notifyListeners();
       return false;
     }
@@ -151,7 +155,9 @@ class NearbyMeshService extends ChangeNotifier {
 
             // W trybie auto: asymetria nazw zapobiega konfliktom 8003
             // W trybie discovererOnly: zawsze inicjuje połączenie
-            final shouldConnect = (role == MeshRole.discovererOnly) || (nodeName.compareTo(name) > 0);
+            final shouldConnect =
+                (role == MeshRole.discovererOnly) ||
+                (nodeName.compareTo(name) > 0);
 
             if (shouldConnect) {
               _connectingEndpoints.add(endpointId);
@@ -194,7 +200,9 @@ class NearbyMeshService extends ChangeNotifier {
   }
 
   void _onConnectionInitiated(String endpointId, ConnectionInfo info) async {
-    debugPrint("Nearby: Inicjacja połączenia z ${info.endpointName} ($endpointId)");
+    debugPrint(
+      "Nearby: Inicjacja połączenia z ${info.endpointName} ($endpointId)",
+    );
     try {
       await Nearby().acceptConnection(
         endpointId,
@@ -241,7 +249,10 @@ class NearbyMeshService extends ChangeNotifier {
     }
   }
 
-  Future<void> _sendPacketToEndpoint(String endpointId, SosPacket packet) async {
+  Future<void> _sendPacketToEndpoint(
+    String endpointId,
+    SosPacket packet,
+  ) async {
     try {
       final jsonString = jsonEncode(packet.toJson());
       final bytes = Uint8List.fromList(utf8.encode(jsonString));
@@ -266,7 +277,8 @@ class NearbyMeshService extends ChangeNotifier {
       packet.hopCount += 1;
       await OfflineStorage.savePacket(packet);
 
-      _statusMessage = "ODEBRANO SOS: ${packet.senderName} (skok: ${packet.hopCount})";
+      _statusMessage =
+          "ODEBRANO SOS: ${packet.senderName} (skok: ${packet.hopCount})";
       notifyListeners();
 
       if (_incomingCallback != null) {

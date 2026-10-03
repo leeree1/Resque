@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../models/sos_packet.dart';
+import '../services/firebase_sync_service.dart';
 import '../services/mesh_engine.dart';
 import '../services/nearby_mesh_service.dart';
 
@@ -80,6 +81,10 @@ class MapOfflineScreen extends StatefulWidget {
 
 class _MapOfflineScreenState extends State<MapOfflineScreen> {
   int _tabIndex = 0; // 0 - Punkty bezpieczne, 1 - Zgłoszenia SOS
+
+  // Strumień tworzony raz — inaczej StreamBuilder przy każdym rebuildzie
+  // zakładałby nową subskrypcję i zapętlał animację.
+  late final Stream<List<SosPacket>> _sosStream = FirebaseSyncService.watchAllSos();
 
   // Stała baza punktów awaryjnych (współrzędne lokalne)
   final List<TacticalSafePoint> _safePoints = const [
@@ -214,7 +219,7 @@ class _MapOfflineScreenState extends State<MapOfflineScreen> {
         ),
       ),
       body: StreamBuilder<List<SosPacket>>(
-        stream: MeshNodeService().packetsStream,
+        stream: _sosStream,
         initialData: MeshNodeService().getAllPackets(),
         builder: (context, snapshot) {
           final packets = snapshot.data ?? [];

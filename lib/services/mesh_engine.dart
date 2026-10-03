@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import '../models/sos_packet.dart';
+import 'firebase_sync_service.dart';
 import 'offline_storage.dart';
 import 'nearby_mesh_service.dart';
 
@@ -62,6 +63,9 @@ class MeshNodeService {
 
     // 2. Wysłanie w powietrze przez radio Nearby
     await NearbyMeshService().sendPacket(packet);
+
+    // 3. Jeśli mamy internet, pakiet od razu leci do Firebase
+    FirebaseSyncService.trySyncInBackground();
   }
 
   /// Wywoływane automatycznie na telefonie odbiorcy
@@ -78,17 +82,21 @@ class MeshNodeService {
 
       await OfflineStorage.savePacket(packet);
       debugPrint('SUKCES: Odebrano i zaktualizowano listę pakietów o ${packet.id}');
+
+      // Jeśli ten telefon ma internet, pakiet trafia teraz do Firebase
+      FirebaseSyncService.trySyncInBackground();
     } catch (e) {
       debugPrint('Błąd parsowania pakietu: $e');
     }
   }
 
+  /// Wypycha bufor do Firebase (synchronizacja ze sztabem)
   Future<void> flushToCentralServer() async {
-    if (_packetStorage.isEmpty) return;
-    await OfflineStorage.clearAll();
+    final synced = await FirebaseSyncService.syncLocalQueue();
+    if (!synced) return;
     _packetStorage.clear();
     _packetsStreamController.add([]);
-    _statusStreamController.add('Zsynchronizowano pakiety ze sztabem!');
+    _statusStreamController.add('Zsynchronizowano pakiety z bazą Firebase!');
   }
 
   List<SosPacket> getAllPackets() => _packetStorage.values.toList();
