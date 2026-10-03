@@ -1,29 +1,54 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'models/sos_packet.dart';
 import 'screens/sos_broadcast_screen.dart';
-import 'screens/sos_incoming_screen.dart';
 import 'screens/relay_monitor_screen.dart';
 import 'screens/radar_screen.dart';
 import 'services/mesh_engine.dart';
 import 'services/nearby_mesh_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Inicjalizacja bazy Store-and-Forward
+  MeshNodeService();
+
   runApp(const ResqueApp());
+
+  // Uruchomienie nasłuchu i rozgłaszania Nearby po wyrenderowaniu pierwszej klatki UI
+  unawaited(NearbyMeshService().start());
 }
 
-class ResqueApp extends StatefulWidget {
+class ResqueApp extends StatelessWidget {
   const ResqueApp({super.key});
 
   @override
-  State<ResqueApp> createState() => _ResqueAppState();
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Resque',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF121212),
+        colorScheme: const ColorScheme.dark(
+          primary: Colors.redAccent,
+          secondary: Colors.cyanAccent,
+          surface: Color(0xFF1E1E1E),
+        ),
+        useMaterial3: true,
+      ),
+      home: const MainNavigationScreen(),
+    );
+  }
 }
 
-class _ResqueAppState extends State<ResqueApp> {
-  final _navKey = GlobalKey<NavigatorState>();
-  final _shownPacketIds = <String>{};
-  late final StreamSubscription<SosPacket> _peerSub;
+class MainNavigationScreen extends StatefulWidget {
+  const MainNavigationScreen({super.key});
+
+  @override
+  State<MainNavigationScreen> createState() => _MainNavigationScreenState();
+}
+
+class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
 
   final List<Widget> _screens = const [
@@ -33,70 +58,34 @@ class _ResqueAppState extends State<ResqueApp> {
   ];
 
   @override
-  void initState() {
-    super.initState();
-    _peerSub = MeshNodeService().peerAlerts.listen(_onPeerAlert);
-    unawaited(NearbyMeshService().start());
-  }
-
-  @override
-  void dispose() {
-    _peerSub.cancel();
-    super.dispose();
-  }
-
-  void _onPeerAlert(SosPacket packet) {
-    if (!_shownPacketIds.add(packet.id)) return;
-
-    void open() {
-      if (!mounted) return;
-      _navKey.currentState?.push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => SosIncomingScreen(packet: packet),
-        ),
-      );
-    }
-
-    if (_navKey.currentState == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => open());
-    } else {
-      open();
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: _navKey,
-      title: 'Resque',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF121212),
+    return Scaffold(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _screens,
       ),
-      home: Scaffold(
-        body: _screens[_currentIndex],
-        bottomNavigationBar: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          backgroundColor: const Color(0xFF181818),
-          selectedItemColor: Colors.redAccent,
-          unselectedItemColor: Colors.white38,
-          onTap: (index) => setState(() => _currentIndex = index),
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.warning_amber_rounded),
-              label: 'Nadaj SOS',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.hub_outlined),
-              label: 'Węzeł Mesh',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.radar),
-              label: 'Radar BLE',
-            ),
-          ],
-        ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) => setState(() => _currentIndex = index),
+        backgroundColor: const Color(0xFF181818),
+        indicatorColor: Colors.redAccent.withOpacity(0.2),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.sos, color: Colors.white70),
+            selectedIcon: Icon(Icons.sos, color: Colors.redAccent),
+            label: 'Nadaj SOS',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.hub_outlined, color: Colors.white70),
+            selectedIcon: Icon(Icons.hub, color: Colors.cyanAccent),
+            label: 'Węzeł Mesh',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.radar_outlined, color: Colors.white70),
+            selectedIcon: Icon(Icons.radar, color: Colors.greenAccent),
+            label: 'Radar BLE',
+          ),
+        ],
       ),
     );
   }

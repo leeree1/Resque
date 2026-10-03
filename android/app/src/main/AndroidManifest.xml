@@ -1,28 +1,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Wi-Fi P2P / Direct -->
+    <!-- Wi-Fi State & P2P -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     
-    <!-- Bluetooth klasyczny (dla starszych wersji Androida < 12) -->
+    <!-- Bluetooth klasyczny (Android <= 11) -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
 
-    <!-- Lokalizacja wymagana do skanowania radiowego BLE/Wi-Fi -->
+    <!-- Lokalizacja - BEZWZGLĘDNIE WYMAGANA do skanowania radiowego -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
-    <!-- Nowe uprawnienia Bluetooth dla Androida 12+ (API 31+) -->
-    <uses-permission 
-        android:name="android.permission.BLUETOOTH_SCAN" 
-        android:usesPermissionFlags="neverForLocation" />
+    <!-- Bluetooth Android 12+ (BEZ neverForLocation!) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <!-- Wi-Fi Direct dla Androida 13+ (API 33+) -->
-    <uses-permission 
-        android:name="android.permission.NEARBY_WIFI_DEVICES" 
-        android:usesPermissionFlags="neverForLocation" />
+    <!-- Wi-Fi Direct Android 13+ (BEZ neverForLocation!) -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 
     <application
         android:label="resque"
@@ -32,7 +28,6 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
@@ -40,8 +35,7 @@
             
             <meta-data
               android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
+              android:resource="@style/NormalTheme" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
