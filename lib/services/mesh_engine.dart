@@ -1,19 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import '../models/sos_packet.dart';
-import 'nearby_mesh_service.dart';
+import 'firebase_sync_service.dart';
 import 'offline_storage.dart';
+import 'nearby_mesh_service.dart';
 
 class MeshNodeService {
   static final MeshNodeService _instance = MeshNodeService._internal();
   factory MeshNodeService() => _instance;
 
   MeshNodeService._internal() {
-    final link = NearbyMeshService();
-    link.bindIncoming((raw) => onPacketReceivedFromPeer(raw));
-    _outbound = link.sendPacket;
-    _initStorage();
+    _initStorageAndConnectivity();
+    _bindRadioService();
   }
 
   final Map<String, SosPacket> _packetStorage = {};
@@ -22,77 +22,81 @@ class MeshNodeService {
       StreamController<List<SosPacket>>.broadcast();
   Stream<List<SosPacket>> get packetsStream => _packetsStreamController.stream;
 
-  final StreamController<SosPacket> _peerAlerts =
-      StreamController<SosPacket>.broadcast();
-  Stream<SosPacket> get peerAlerts => _peerAlerts.stream;
+  final StreamController<String> _statusStreamController =
+      StreamController<String>.broadcast();
+  Stream<String> get statusStream => _statusStreamController.stream;
 
-  Future<void> Function(SosPacket packet)? _outbound;
-
-  Future<void> _initStorage() async {
-    try {
-      final savedPackets = await OfflineStorage.loadAllPackets();
-      for (final packet in savedPackets) {
-        _packetStorage[packet.id] = packet;
-      }
-      _packetsStreamController.add(_packetStorage.values.toList());
-    } catch (e) {
-      debugPrint('Bufor offline niedostępny: $e');
-    }
+  void _bindRadioService() {
+    // Spięcie odbioru radiowego z silnikiem bazy
+    NearbyMeshService().bindIncoming((rawJson) {
+      onPacketReceivedFromPeer(rawJson);
+    });
   }
 
-  void _remember(SosPacket packet) {
+  Future<void> _initStorageAndConnectivity() async {
+    final savedPackets = await OfflineStorage.loadAllPackets();
+    for (var packet in savedPackets) {
+      _packetStorage[packet.id] = packet;
+    }
+    _packetsStreamController.add(_packetStorage.values.toList());
+
+    Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+      final hasInternet = results.any((r) =>
+          r == ConnectivityResult.wifi ||
+          r == ConnectivityResult.mobile ||
+          r == ConnectivityResult.ethernet);
+
+      if (hasInternet && _packetStorage.isNotEmpty) {
+        _statusStreamController.add('Wykryto Internet! Synchronizacja bufora...');
+        flushToCentralServer();
+      }
+    });
+  }
+
+  /// Wywoływane po wciśnięciu SOS na telefonie poszkodowanego
+  Future<void> broadcastMySos(SosPacket packet) async {
     _packetStorage[packet.id] = packet;
     _packetsStreamController.add(_packetStorage.values.toList());
+
+    // 1. Zapis na dysku telefonu
+    await OfflineStorage.savePacket(packet);
+
+    // 2. Wysłanie w powietrze przez radio Nearby
+    await NearbyMeshService().sendPacket(packet);
+
+    // 3. Jeśli mamy internet, pakiet od razu leci do Firebase
+    FirebaseSyncService.trySyncInBackground();
   }
 
-  /// Zapis lokalny i wysyłka tylko do innych aplikacji Resque w zasięgu.
-  Future<void> broadcastMySos(SosPacket packet) async {
-    _remember(packet);
+  /// Wywoływane automatycznie na telefonie odbiorcy
+  Future<void> onPacketReceivedFromPeer(String rawJson) async {
     try {
-      await OfflineStorage.savePacket(packet);
-    } catch (e) {
-      debugPrint('Zapis SOS nieudany: $e');
-    }
-    await _outbound?.call(packet);
-  }
-
-  /// Odbiór pakietu od innego telefonu z tą aplikacją.
-  Future<void> onPacketReceivedFromPeer(
-    String rawJson, {
-    bool relay = true,
-  }) async {
-    try {
-      final decoded = jsonDecode(rawJson);
-      if (decoded is! Map) return;
-      final packet = SosPacket.fromJson(Map<String, dynamic>.from(decoded));
+      final data = jsonDecode(rawJson);
+      final packet = SosPacket.fromJson(data);
 
       if (_packetStorage.containsKey(packet.id)) return;
 
       packet.hopCount += 1;
-      _remember(packet);
+      _packetStorage[packet.id] = packet;
+      _packetsStreamController.add(_packetStorage.values.toList());
 
-      try {
-        await OfflineStorage.savePacket(packet);
-      } catch (e) {
-        debugPrint('Zapis odebranego SOS nieudany: $e');
-      }
+      await OfflineStorage.savePacket(packet);
+      debugPrint('SUKCES: Odebrano i zaktualizowano listę pakietów o ${packet.id}');
 
-      _peerAlerts.add(packet);
-
-      if (relay && packet.hopCount < 5) {
-        await _outbound?.call(packet);
-      }
+      // Jeśli ten telefon ma internet, pakiet trafia teraz do Firebase
+      FirebaseSyncService.trySyncInBackground();
     } catch (e) {
       debugPrint('Błąd parsowania pakietu: $e');
     }
   }
 
-  /// Czyści tylko lokalną listę. Nikomu nic nie wysyła.
-  Future<void> clearLocalBuffer() async {
-    if (_packetStorage.isEmpty) return;
-    await OfflineStorage.clearAll();
+  /// Wypycha bufor do Firebase (synchronizacja ze sztabem)
+  Future<void> flushToCentralServer() async {
+    final synced = await FirebaseSyncService.syncLocalQueue();
+    if (!synced) return;
     _packetStorage.clear();
     _packetsStreamController.add([]);
+    _statusStreamController.add('Zsynchronizowano pakiety z bazą Firebase!');
   }
 
   List<SosPacket> getAllPackets() => _packetStorage.values.toList();

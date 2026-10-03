@@ -1,300 +1,313 @@
 import 'dart:async';
 import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:nearby_connections/nearby_connections.dart' as nearby;
+import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
-
 import '../models/sos_packet.dart';
+import 'offline_storage.dart';
 
-/// Cichy kanał między telefonami z aplikacją Resque.
-///
-/// Google Nearby Connections widzą tylko aplikacje z tym samym serviceId.
-/// Nie wysyłamy powiadomienia systemowego i nie ogłaszamy SOS telefonom bez Resque.
+enum MeshRole { auto, advertiserOnly, discovererOnly }
+
 class NearbyMeshService extends ChangeNotifier {
-  static final NearbyMeshService _instance = NearbyMeshService._();
+  static final NearbyMeshService _instance = NearbyMeshService._internal();
   factory NearbyMeshService() => _instance;
-  NearbyMeshService._();
+  NearbyMeshService._internal();
 
-  static const String serviceId = 'com.example.resque';
-  static const String _nickname = 'Resque';
+  // Zmiana na P2P_STAR eliminuje zawieszanie anteny radiowej na wielu procesorach
+  final Strategy strategy = Strategy.P2P_STAR;
 
-  final Set<String> _peers = {};
-  final Set<String> _connected = {};
-  final Set<String> _inviting = {};
-  final Map<String, SosPacket> _outbound = {};
-  final List<String> _outboundOrder = [];
-  final Map<String, Set<String>> _delivered = {};
+  // Nowy identyfikator unieważnia zawieszone w tle sesje Google Nearby
+  static const String serviceId = "com.resque.emergency.mesh.v3";
 
-  Future<void> Function(String rawJson)? _onRaw;
-  Future<void>? _starting;
-  Future<void> _flushTail = Future<void>.value();
+  bool _isStarted = false;
+  bool _needsSettings = false;
+  String _statusMessage = "Inicjalizacja węzła...";
+  final Set<String> _connectedEndpoints = {};
+  final Set<String> _connectingEndpoints = {};
+  final Set<String> _discoveredEndpoints = {};
+  final Set<String> _processedPacketIds = {};
+  final Map<String, int> _deliveryCounts = {};
 
-  bool _running = false;
-  bool permissionsGranted = false;
-  bool needsSettings = false;
-  String statusMessage = 'Uruchamiam nasłuch aplikacji Resque…';
+  void Function(String rawJson)? _incomingCallback;
 
-  bool get isAndroidDevice =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  bool get isSupported => !kIsWeb;
+  int get peersInRange =>
+      _discoveredEndpoints.length + _connectedEndpoints.length;
+  String get statusMessage => _statusMessage;
+  bool get needsSettings => _needsSettings;
 
-  bool get isSupported => isAndroidDevice;
+  int deliveredCount(String packetId) => _deliveryCounts[packetId] ?? 0;
 
-  bool get isRunning => _running;
-
-  int get peersInRange => _peers.length;
-
-  int deliveredCount(String? packetId) {
-    if (packetId == null) return 0;
-    return _delivered[packetId]?.length ?? 0;
+  void bindIncoming(void Function(String rawJson) callback) {
+    _incomingCallback = callback;
   }
 
-  void bindIncoming(Future<void> Function(String rawJson) onRaw) {
-    _onRaw = onRaw;
+  Future<void> openSettings() async {
+    await openAppSettings();
   }
 
-  Future<void> start() {
-    return _starting ??= _startInternal();
-  }
-
-  Future<void> openSettings() => openAppSettings();
-
-  Future<void> sendPacket(SosPacket packet) async {
-    _rememberOutbound(packet);
-    await start();
-    if (_running) {
-      await _enqueueFlush();
-    }
-    notifyListeners();
-  }
-
-  Future<void> _startInternal() async {
-    try {
-      if (!isAndroidDevice) {
-        _running = false;
-        permissionsGranted = false;
-        statusMessage =
-            'Nasłuch w zasięgu działa na telefonie z Androidem. Na tym urządzeniu nikt obok nie dostanie sygnału.';
-        return;
-      }
-
-      final allowed = await _requestPermissions();
-      permissionsGranted = allowed;
-      if (!allowed) {
-        _running = false;
-        statusMessage =
-            'Brak zgody na urządzenia w pobliżu. Druga aplikacja Resque nie odbierze SOS. Telefony bez tej aplikacji i tak nie dostaną powiadomienia.';
-        return;
-      }
-
-      final gpsOn = await Geolocator.isLocationServiceEnabled();
-      if (!gpsOn) {
-        statusMessage =
-            'Włącz lokalizację w systemie, żeby znaleźć drugą aplikację. Współrzędne dołączamy do SOS tylko, gdy je zaznaczysz.';
-      }
-
-      var advertising = false;
-      var discovering = false;
-      Object? failure;
-
-      try {
-        advertising = await nearby.Nearby().startAdvertising(
-          _nickname,
-          nearby.Strategy.P2P_CLUSTER,
-          onConnectionInitiated: _onInitiated,
-          onConnectionResult: _onResult,
-          onDisconnected: _onDisconnected,
-          serviceId: serviceId,
-        );
-      } catch (e) {
-        failure = e;
-        debugPrint('Resque advertise: $e');
-      }
-
-      try {
-        discovering = await nearby.Nearby().startDiscovery(
-          _nickname,
-          nearby.Strategy.P2P_CLUSTER,
-          onEndpointFound: _onEndpointFound,
-          onEndpointLost: _onEndpointLost,
-          serviceId: serviceId,
-        );
-      } catch (e) {
-        failure ??= e;
-        debugPrint('Resque discovery: $e');
-      }
-
-      _running = advertising || discovering;
-      if (_running) {
-        statusMessage = gpsOn
-            ? 'Szukam innych aplikacji Resque w zasięgu. Powiadomienia systemowe nie wychodzą.'
-            : statusMessage;
-      } else {
-        statusMessage =
-            'Nie udało się włączyć nasłuchu (${_shortError(failure)}). SOS nie wyjdzie poza ten telefon.';
-      }
-    } finally {
-      _starting = null;
+  Future<void> start({MeshRole role = MeshRole.auto}) async {
+    if (kIsWeb) {
+      _statusMessage = "Web: Symulacja BLE (brak sprzętowego Nearby)";
       notifyListeners();
+      return;
     }
+
+    if (_isStarted) return;
+    _isStarted = true;
+
+    final randomSuffix = DateTime.now().microsecondsSinceEpoch
+        .toString()
+        .substring(9);
+    final nodeName = "Resque_$randomSuffix";
+    await startMeshNode(nodeName: nodeName, role: role);
   }
 
-  Future<bool> _requestPermissions() async {
+  Future<bool> checkAndRequestPermissions() async {
+    if (kIsWeb) return false;
+
     final statuses = await [
-      Permission.location,
-      Permission.bluetooth,
+      Permission.locationWhenInUse,
       Permission.bluetoothScan,
       Permission.bluetoothAdvertise,
       Permission.bluetoothConnect,
       Permission.nearbyWifiDevices,
     ].request();
 
-    bool granted(Permission permission) {
-      final status = statuses[permission];
-      if (status == null) return false;
-      return status.isGranted || status.isLimited;
-    }
+    final isDenied =
+        statuses[Permission.locationWhenInUse]?.isPermanentlyDenied == true ||
+        statuses[Permission.bluetoothScan]?.isPermanentlyDenied == true;
 
-    needsSettings = statuses.values.any((status) => status.isPermanentlyDenied);
-
-    final locationOk = granted(Permission.location);
-    final radioOk = granted(Permission.bluetoothScan) &&
-        granted(Permission.bluetoothAdvertise) &&
-        granted(Permission.bluetoothConnect);
-    return locationOk && radioOk;
-  }
-
-  void _onEndpointFound(String id, String name, String foundServiceId) {
-    if (foundServiceId.isNotEmpty && foundServiceId != serviceId) return;
-    if (name.isNotEmpty && name != _nickname) return;
-
-    _peers.add(id);
-    notifyListeners();
-
-    if (_connected.contains(id) || _inviting.contains(id)) return;
-    _inviting.add(id);
-    nearby.Nearby()
-        .requestConnection(
-          _nickname,
-          id,
-          onConnectionInitiated: _onInitiated,
-          onConnectionResult: _onResult,
-          onDisconnected: _onDisconnected,
-        )
-        .catchError((Object e) {
-      _inviting.remove(id);
-      debugPrint('Resque requestConnection: $e');
-      return false;
-    });
-  }
-
-  void _onEndpointLost(String? id) {
-    if (id == null) return;
-    _inviting.remove(id);
-    if (!_connected.contains(id)) {
-      _peers.remove(id);
+    if (isDenied) {
+      _needsSettings = true;
+      _statusMessage =
+          "Wymagane uprawnienia Bluetooth/Lokalizacji w Ustawieniach.";
       notifyListeners();
+      return false;
     }
+
+    return true;
   }
 
-  void _onInitiated(String id, nearby.ConnectionInfo info) {
-    if (info.endpointName.isNotEmpty && info.endpointName != _nickname) {
-      unawaited(nearby.Nearby().rejectConnection(id));
-      return;
-    }
-    unawaited(_accept(id));
-  }
+  Future<void> startMeshNode({
+    required String nodeName,
+    MeshRole role = MeshRole.auto,
+  }) async {
+    if (kIsWeb) return;
 
-  Future<void> _accept(String id) async {
+    final permsGranted = await checkAndRequestPermissions();
+    if (!permsGranted) return;
+
+    // Twardy reset poprzednich sesji i krótka pauza na zwolnienie zasobów radiowych
     try {
-      await nearby.Nearby().acceptConnection(
-        id,
-        onPayLoadRecieved: _onPayload,
-        onPayloadTransferUpdate: (_, _) {},
-      );
-    } catch (e) {
-      debugPrint('Resque accept: $e');
-    }
-  }
+      await Nearby().stopAllEndpoints();
+      await Nearby().stopAdvertising();
+      await Nearby().stopDiscovery();
+      await Future.delayed(const Duration(milliseconds: 350));
+    } catch (_) {}
 
-  void _onResult(String id, nearby.Status status) {
-    _inviting.remove(id);
-    if (status == nearby.Status.CONNECTED) {
-      _connected.add(id);
-      _peers.add(id);
-      _enqueueFlush();
-    }
-    notifyListeners();
-  }
+    _connectedEndpoints.clear();
+    _connectingEndpoints.clear();
+    _discoveredEndpoints.clear();
 
-  void _onDisconnected(String id) {
-    _connected.remove(id);
-    _peers.remove(id);
-    _inviting.remove(id);
-    notifyListeners();
-  }
-
-  void _onPayload(String endpointId, nearby.Payload payload) {
-    if (payload.type != nearby.PayloadType.BYTES) return;
-    final bytes = payload.bytes;
-    if (bytes == null || bytes.isEmpty) return;
-
-    final raw = utf8.decode(bytes, allowMalformed: true);
-    final handler = _onRaw;
-    if (handler == null) return;
-    handler(raw);
-  }
-
-  void _rememberOutbound(SosPacket packet) {
-    _outbound[packet.id] = packet;
-    _outboundOrder.remove(packet.id);
-    _outboundOrder.add(packet.id);
-    while (_outboundOrder.length > 30) {
-      final removed = _outboundOrder.removeAt(0);
-      _outbound.remove(removed);
-    }
-  }
-
-  Future<void> _enqueueFlush() {
-    final next = _flushTail.then((_) => _flushBody());
-    _flushTail = next.catchError((Object e) {
-      debugPrint('Resque flush: $e');
-    });
-    return next;
-  }
-
-  Future<void> _flushBody() async {
-    if (!_running || _connected.isEmpty || _outbound.isEmpty) return;
-
-    final packets = _outboundOrder
-        .map((id) => _outbound[id])
-        .whereType<SosPacket>()
-        .toList();
-    final endpoints = List<String>.of(_connected);
-
-    for (final packet in packets) {
-      final raw = Uint8List.fromList(utf8.encode(jsonEncode(packet.toJson())));
-      for (final endpoint in endpoints) {
-        if (!_connected.contains(endpoint)) continue;
-        final sent = _delivered.putIfAbsent(packet.id, () => <String>{});
-        if (sent.contains(endpoint)) continue;
-        try {
-          await nearby.Nearby().sendBytesPayload(endpoint, raw);
-          sent.add(endpoint);
-        } catch (e) {
-          debugPrint('Resque send: $e');
+    // 1. Nadawanie (Advertising) - pomijane, jeśli wymuszono tylko odbiór
+    if (role != MeshRole.discovererOnly) {
+      try {
+        await Nearby().startAdvertising(
+          nodeName,
+          strategy,
+          onConnectionInitiated: _onConnectionInitiated,
+          onConnectionResult: _onConnectionResult,
+          onDisconnected: (id) {
+            _connectedEndpoints.remove(id);
+            _connectingEndpoints.remove(id);
+            _statusMessage = "Rozłączono z $id";
+            notifyListeners();
+          },
+          serviceId: serviceId,
+        );
+        _statusMessage = "Nadawanie aktywne ($nodeName)";
+      } catch (e) {
+        if (e.toString().contains("8001")) {
+          debugPrint("Nearby: Kod 8001 (nadawanie w toku) - kontynuuję.");
+        } else {
+          _statusMessage = "Status nadawania: $e";
         }
       }
     }
+
+    // 2. Odkrywanie (Discovery) - pomijane, jeśli wymuszono tylko nadawanie
+    if (role != MeshRole.advertiserOnly) {
+      try {
+        await Nearby().startDiscovery(
+          nodeName,
+          strategy,
+          onEndpointFound: (endpointId, name, sId) async {
+            debugPrint("Nearby: ZNALEZIONO WĘZEŁ $name ($endpointId)");
+            _discoveredEndpoints.add(endpointId);
+            _statusMessage = "Wykryto węzeł: $name";
+            notifyListeners();
+
+            if (_connectedEndpoints.contains(endpointId) ||
+                _connectingEndpoints.contains(endpointId)) {
+              return;
+            }
+
+            // W trybie auto: asymetria nazw zapobiega konfliktom 8003
+            // W trybie discovererOnly: zawsze inicjuje połączenie
+            final shouldConnect =
+                (role == MeshRole.discovererOnly) ||
+                (nodeName.compareTo(name) > 0);
+
+            if (shouldConnect) {
+              _connectingEndpoints.add(endpointId);
+              debugPrint("Nearby: Wysyłam prośbę o połączenie do $name...");
+              try {
+                await Nearby().requestConnection(
+                  nodeName,
+                  endpointId,
+                  onConnectionInitiated: _onConnectionInitiated,
+                  onConnectionResult: _onConnectionResult,
+                  onDisconnected: (id) {
+                    _connectedEndpoints.remove(id);
+                    _connectingEndpoints.remove(id);
+                    notifyListeners();
+                  },
+                );
+              } catch (e) {
+                _connectingEndpoints.remove(endpointId);
+                debugPrint("Błąd requestConnection: $e");
+              }
+            }
+          },
+          onEndpointLost: (id) {
+            _discoveredEndpoints.remove(id);
+            _connectingEndpoints.remove(id);
+            _connectedEndpoints.remove(id);
+            notifyListeners();
+          },
+          serviceId: serviceId,
+        );
+        if (role == MeshRole.discovererOnly) {
+          _statusMessage = "Nasłuch SOS aktywny...";
+        }
+      } catch (e) {
+        _statusMessage = "Błąd discovery: $e";
+      }
+    }
+
     notifyListeners();
   }
 
-  String _shortError(Object? error) {
-    if (error is PlatformException) {
-      return error.message ?? error.code;
+  void _onConnectionInitiated(String endpointId, ConnectionInfo info) async {
+    debugPrint(
+      "Nearby: Inicjacja połączenia z ${info.endpointName} ($endpointId)",
+    );
+    try {
+      await Nearby().acceptConnection(
+        endpointId,
+        onPayLoadRecieved: (endId, payload) {
+          if (payload.type == PayloadType.BYTES && payload.bytes != null) {
+            _handleIncomingPayload(payload.bytes!, endId);
+          }
+        },
+      );
+    } catch (e) {
+      debugPrint("Błąd acceptConnection: $e");
     }
-    return error?.toString() ?? 'brak szczegółów';
+  }
+
+  void _onConnectionResult(String endpointId, Status status) {
+    _connectingEndpoints.remove(endpointId);
+
+    if (status == Status.CONNECTED) {
+      _connectedEndpoints.add(endpointId);
+      _statusMessage = "POŁĄCZONO Z WĘZŁEM!";
+      debugPrint("Nearby: Połączono z $endpointId");
+    } else {
+      _connectedEndpoints.remove(endpointId);
+      _statusMessage = "Nie udało się połączyć ($status)";
+    }
+    notifyListeners();
+  }
+
+  Future<void> sendPacket(SosPacket packet) async {
+    await broadcastSos(packet);
+  }
+
+  Future<void> broadcastSos(SosPacket packet) async {
+    _processedPacketIds.add(packet.id);
+
+    if (_connectedEndpoints.isEmpty) {
+      _statusMessage = "Brak aktywnych połączeń. Pakiet zbuforowany.";
+      notifyListeners();
+      return;
+    }
+
+    for (final endpointId in _connectedEndpoints.toList()) {
+      await _sendPacketToEndpoint(endpointId, packet);
+    }
+  }
+
+  Future<void> _sendPacketToEndpoint(
+    String endpointId,
+    SosPacket packet,
+  ) async {
+    try {
+      final jsonString = jsonEncode(packet.toJson());
+      final bytes = Uint8List.fromList(utf8.encode(jsonString));
+      await Nearby().sendBytesPayload(endpointId, bytes);
+      _deliveryCounts[packet.id] = (_deliveryCounts[packet.id] ?? 0) + 1;
+      _statusMessage = "Wysłano SOS do węzła $endpointId";
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Błąd sendBytesPayload: $e");
+    }
+  }
+
+  void _handleIncomingPayload(Uint8List bytes, String sourceEndpointId) async {
+    try {
+      final raw = utf8.decode(bytes);
+      final jsonMap = jsonDecode(raw);
+      final packet = SosPacket.fromJson(jsonMap);
+
+      if (_processedPacketIds.contains(packet.id)) return;
+      _processedPacketIds.add(packet.id);
+
+      packet.hopCount += 1;
+      await OfflineStorage.savePacket(packet);
+
+      _statusMessage =
+          "ODEBRANO SOS: ${packet.senderName} (skok: ${packet.hopCount})";
+      notifyListeners();
+
+      if (_incomingCallback != null) {
+        _incomingCallback!(raw);
+      }
+
+      // Podaj dalej pakiet (Mesh Relay)
+      for (final endpointId in _connectedEndpoints.toList()) {
+        if (endpointId != sourceEndpointId) {
+          await _sendPacketToEndpoint(endpointId, packet);
+        }
+      }
+    } catch (e) {
+      debugPrint("Błąd przetwarzania pakietu: $e");
+    }
+  }
+
+  Future<void> stopAll() async {
+    _connectedEndpoints.clear();
+    _connectingEndpoints.clear();
+    _discoveredEndpoints.clear();
+    _isStarted = false;
+    if (!kIsWeb) {
+      try {
+        await Nearby().stopAllEndpoints();
+        await Nearby().stopAdvertising();
+        await Nearby().stopDiscovery();
+      } catch (_) {}
+    }
+    notifyListeners();
   }
 }
