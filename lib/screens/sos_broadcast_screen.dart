@@ -256,14 +256,15 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.bluetooth_searching, color: Colors.cyanAccent, size: 20),
-              const SizedBox(width: 8),
-              Text('Pobliskie węzły przekaźnikowe: $_nearbyRelaysFound', style: const TextStyle(color: Colors.white70, fontSize: 13)),
-            ],
+          const Icon(Icons.bluetooth_searching, color: Colors.cyanAccent, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Pobliskie węzły przekaźnikowe: $_nearbyRelaysFound', style: const TextStyle(color: Colors.white70, fontSize: 13)),
           ),
-          const Text('Gotowy do skoku', style: TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+          const SizedBox(width: 12),
+          const Flexible(
+            child: Text('Gotowy do skoku', textAlign: TextAlign.end, style: TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
         ],
       ),
     );
