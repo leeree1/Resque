@@ -1,45 +1,36 @@
 import 'package:flutter/material.dart';
 import '../models/sos_packet.dart';
 import '../services/mesh_engine.dart';
-import '../services/nearby_mesh_service.dart';
 
 class RelayMonitorScreen extends StatelessWidget {
   const RelayMonitorScreen({super.key});
+
+  String _requestTitle(SosPacket packet) {
+    if (!packet.shareType) return 'Osoba potrzebująca pomocy';
+    return switch (packet.type) {
+      EmergencyType.medical => 'Potrzebna pomoc medyczna',
+      EmergencyType.fire => 'Zagrożenie pożarem',
+      EmergencyType.flood => 'Zagrożenie powodzią',
+      EmergencyType.trapped => 'Osoba uwięziona',
+      EmergencyType.other => 'Osoba potrzebująca pomocy',
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bufor Store-and-Forward'),
+        title: const Text('Zgłoszenia SOS'),
         backgroundColor: Colors.transparent,
       ),
       body: Column(
         children: [
-          // Pasek statusu połączenia
-          AnimatedBuilder(
-            animation: NearbyMeshService(),
-            builder: (context, _) {
-              final service = NearbyMeshService();
-              return Container(
-                padding: const EdgeInsets.all(12),
-                color: service.peersInRange > 0 ? Colors.green.shade900 : Colors.grey.shade900,
-                child: Row(
-                  children: [
-                    Icon(
-                      service.peersInRange > 0 ? Icons.link : Icons.link_off,
-                      color: Colors.white,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        service.statusMessage,
-                        style: const TextStyle(fontSize: 12, color: Colors.white),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Text(
+              'Twój telefon pomaga przekazywać prośby o pomoc innym osobom w pobliżu.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
           ),
           // Lista odebranych pakietów w czasie rzeczywistym
           Expanded(
@@ -52,7 +43,7 @@ class RelayMonitorScreen extends StatelessWidget {
                 if (packets.isEmpty) {
                   return const Center(
                     child: Text(
-                      'Brak odebranych pakietów SOS w buforze.\nOczekiwanie na sygnał radiowy...',
+                      'Nie ma jeszcze zgłoszeń SOS.\nTutaj pojawią się prośby o pomoc.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.white54),
                     ),
@@ -64,15 +55,17 @@ class RelayMonitorScreen extends StatelessWidget {
                   itemCount: packets.length,
                   itemBuilder: (context, index) {
                     final pkt = packets[index];
-                    final latStr = pkt.latitude?.toStringAsFixed(4) ?? 'n/a';
-                    final lngStr = pkt.longitude?.toStringAsFixed(4) ?? 'n/a';
+                    final location = pkt.locationLabel;
 
                     return Card(
                       color: const Color(0xFF1E1E1E),
                       margin: const EdgeInsets.only(bottom: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
-                        side: const BorderSide(color: Colors.redAccent, width: 1.5),
+                        side: const BorderSide(
+                          color: Colors.redAccent,
+                          width: 1.5,
+                        ),
                       ),
                       child: ListTile(
                         leading: const CircleAvatar(
@@ -80,23 +73,20 @@ class RelayMonitorScreen extends StatelessWidget {
                           child: Icon(Icons.warning, color: Colors.white),
                         ),
                         title: Text(
-                          '${pkt.senderName} (${pkt.type.name.toUpperCase()})',
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                          _requestTitle(pkt),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
                         ),
                         subtitle: Text(
-                          '${pkt.message}\nGPS: $latStr, $lngStr',
+                          [
+                            if (pkt.shareMessage &&
+                                pkt.message.trim().isNotEmpty)
+                              pkt.message.trim(),
+                            if (location != null) 'Lokalizacja: $location',
+                          ].join('\n'),
                           style: const TextStyle(color: Colors.white70),
-                        ),
-                        trailing: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.white10,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            'Skok: ${pkt.hopCount}',
-                            style: const TextStyle(color: Colors.greenAccent, fontSize: 12),
-                          ),
                         ),
                       ),
                     );
