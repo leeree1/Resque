@@ -21,14 +21,32 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
   bool _isLoadingGps = false;
   SosPacket? _activePacket;
 
-  final _noteController =
-      TextEditingController(text: 'Uwięzienie na dachu, potrzebna ewakuacja');
+  bool _hasCustomNote = false;
+  late final TextEditingController _noteController;
+
+  String _defaultNote(EmergencyType type) => switch (type) {
+        EmergencyType.medical => 'Potrzebuję pomocy medycznej.',
+        EmergencyType.flood => 'Zagraża mi powódź, potrzebuję pomocy.',
+        EmergencyType.trapped => 'Jestem uwięziony/a, potrzebuję pomocy w wydostaniu się.',
+        EmergencyType.fire => 'Zagraża mi pożar, potrzebuję pomocy.',
+        EmergencyType.other => 'Potrzebuję pomocy.',
+      };
+
+  void _selectType(EmergencyType type) {
+    setState(() {
+      _selectedType = type;
+      if (!_hasCustomNote) {
+        _noteController.text = _defaultNote(type);
+      }
+    });
+  }
 
   late AnimationController _pulseController;
 
   @override
   void initState() {
     super.initState();
+    _noteController = TextEditingController(text: _defaultNote(_selectedType));
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
@@ -157,6 +175,7 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
             // Pole krótkiego komunikatu
             TextField(
               controller: _noteController,
+              onChanged: (_) => _hasCustomNote = true,
               enabled: !_isBroadcasting,
               style: const TextStyle(color: Colors.white, fontSize: 13),
               decoration: InputDecoration(
@@ -236,7 +255,7 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
         final isSelected = _selectedType == item.$1;
         return Expanded(
           child: GestureDetector(
-            onTap: _isBroadcasting ? null : () => setState(() => _selectedType = item.$1),
+            onTap: _isBroadcasting ? null : () => _selectType(item.$1),
             child: Container(
               margin: const EdgeInsets.symmetric(horizontal: 3),
               padding: const EdgeInsets.symmetric(vertical: 10),
