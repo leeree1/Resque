@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import '../models/sos_packet.dart';
-import 'firebase_sync_service.dart';
 import 'offline_storage.dart';
 import 'nearby_mesh_service.dart';
 
@@ -26,8 +25,11 @@ class MeshNodeService {
       StreamController<String>.broadcast();
   Stream<String> get statusStream => _statusStreamController.stream;
 
+  final StreamController<SosPacket> _ackStreamController =
+      StreamController<SosPacket>.broadcast();
+  Stream<SosPacket> get ackStream => _ackStreamController.stream;
+
   void _bindRadioService() {
-    // Spięcie odbioru radiowego z silnikiem bazy
     NearbyMeshService().bindIncoming((rawJson) {
       onPacketReceivedFromPeer(rawJson);
     });
@@ -53,26 +55,23 @@ class MeshNodeService {
     });
   }
 
-  /// Wywoływane po wciśnięciu SOS na telefonie poszkodowanego
   Future<void> broadcastMySos(SosPacket packet) async {
     _packetStorage[packet.id] = packet;
     _packetsStreamController.add(_packetStorage.values.toList());
-
-    // 1. Zapis na dysku telefonu
     await OfflineStorage.savePacket(packet);
-
-    // 2. Wysłanie w powietrze przez radio Nearby
     await NearbyMeshService().sendPacket(packet);
-
-    // 3. Jeśli mamy internet, pakiet od razu leci do Firebase
-    FirebaseSyncService.trySyncInBackground();
   }
 
-  /// Wywoływane automatycznie na telefonie odbiorcy
   Future<void> onPacketReceivedFromPeer(String rawJson) async {
     try {
       final data = jsonDecode(rawJson);
       final packet = SosPacket.fromJson(data);
+
+      if (packet.isAck) {
+        debugPrint('ACK OTRZYMANY DLA PAKIETU: ${packet.id}');
+        _ackStreamController.add(packet);
+        return;
+      }
 
       if (_packetStorage.containsKey(packet.id)) return;
 
@@ -81,22 +80,29 @@ class MeshNodeService {
       _packetsStreamController.add(_packetStorage.values.toList());
 
       await OfflineStorage.savePacket(packet);
-      debugPrint('SUKCES: Odebrano i zaktualizowano listę pakietów o ${packet.id}');
+      debugPrint('SUKCES: Odebrano SOS od ${packet.senderName}');
 
-      // Jeśli ten telefon ma internet, pakiet trafia teraz do Firebase
-      FirebaseSyncService.trySyncInBackground();
+      final ackPacket = SosPacket(
+        id: packet.id,
+        senderName: 'RATOWNIK_PSP',
+        type: packet.type,
+        message: 'POTWIERDZONO: Zgłoszenie przyjęte do realizacji',
+        timestamp: DateTime.now(),
+        isAck: true,
+        hopCount: 1,
+      );
+      await NearbyMeshService().sendPacket(ackPacket);
     } catch (e) {
-      debugPrint('Błąd parsowania pakietu: $e');
+      debugPrint('Błąd parsowania: $e');
     }
   }
 
-  /// Wypycha bufor do Firebase (synchronizacja ze sztabem)
   Future<void> flushToCentralServer() async {
-    final synced = await FirebaseSyncService.syncLocalQueue();
-    if (!synced) return;
+    if (_packetStorage.isEmpty) return;
+    await OfflineStorage.clearAll();
     _packetStorage.clear();
     _packetsStreamController.add([]);
-    _statusStreamController.add('Zsynchronizowano pakiety z bazą Firebase!');
+    _statusStreamController.add('Zsynchronizowano pakiety ze sztabem!');
   }
 
   List<SosPacket> getAllPackets() => _packetStorage.values.toList();

@@ -1,124 +1,256 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../models/sos_packet.dart';
 import '../services/mesh_engine.dart';
+import '../services/nearby_mesh_service.dart';
 
-class RelayMonitorScreen extends StatelessWidget {
+class RelayMonitorScreen extends StatefulWidget {
   const RelayMonitorScreen({super.key});
 
-  Future<void> _copyLocation(BuildContext context, String? location) async {
-    String message;
-    if (location == null) {
-      message = 'To zgłoszenie nie zawiera lokalizacji.';
-    } else {
-      try {
-        await Clipboard.setData(ClipboardData(text: location));
-        message = 'Skopiowano współrzędne: $location';
-      } catch (_) {
-        message = 'Nie udało się skopiować współrzędnych. Spróbuj ponownie.';
-      }
+  @override
+  State<RelayMonitorScreen> createState() => _RelayMonitorScreenState();
+}
+
+class _RelayMonitorScreenState extends State<RelayMonitorScreen> {
+  String _labelForType(EmergencyType t) {
+    switch (t) {
+      case EmergencyType.medical:
+        return 'Potrzebna pomoc medyczna';
+      case EmergencyType.evacuation:
+        return 'Potrzebna ewakuacja';
+      case EmergencyType.supplies:
+        return 'Potrzebna żywność i woda';
+      case EmergencyType.trapped:
+        return 'Osoba uwięziona';
+      case EmergencyType.other:
+        return 'Inne zagrożenie';
     }
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  String _requestTitle(SosPacket packet) {
-    if (!packet.shareType) return 'Osoba potrzebująca pomocy';
-    return switch (packet.type) {
-      EmergencyType.medical => 'Potrzebna pomoc medyczna',
-      EmergencyType.fire => 'Zagrożenie pożarem',
-      EmergencyType.flood => 'Zagrożenie powodzią',
-      EmergencyType.trapped => 'Osoba uwięziona',
-      EmergencyType.other => 'Osoba potrzebująca pomocy',
-    };
+  Color _statusColor(ReportStatus s) {
+    switch (s) {
+      case ReportStatus.newReport:
+        return Colors.redAccent;
+      case ReportStatus.confirmed:
+        return Colors.amberAccent;
+      case ReportStatus.inProgress:
+        return Colors.cyanAccent;
+      case ReportStatus.resolved:
+        return Colors.greenAccent;
+    }
+  }
+
+  String _statusLabel(ReportStatus s) {
+    switch (s) {
+      case ReportStatus.newReport:
+        return 'NOWE';
+      case ReportStatus.confirmed:
+        return 'POTWIERDZONE';
+      case ReportStatus.inProgress:
+        return 'W TRAKCIE';
+      case ReportStatus.resolved:
+        return 'ROZWIĄZANE';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF0D0F12),
       appBar: AppBar(
-        title: const Text('Zgłoszenia SOS'),
+        title: const Text(
+          'RESQUE · CENTRUM KOORDYNACJI',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+        ),
         backgroundColor: Colors.transparent,
+        elevation: 0,
       ),
-      body: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: Text(
-              'Twój telefon pomaga przekazywać prośby o pomoc innym osobom w pobliżu.',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
-            ),
-          ),
-          // Lista odebranych pakietów w czasie rzeczywistym
-          Expanded(
-            child: StreamBuilder<List<SosPacket>>(
-              stream: MeshNodeService().packetsStream,
-              initialData: MeshNodeService().getAllPackets(),
-              builder: (context, snapshot) {
-                final packets = snapshot.data ?? [];
+      body: StreamBuilder<List<SosPacket>>(
+        stream: MeshNodeService().packetsStream,
+        initialData: MeshNodeService().getAllPackets(),
+        builder: (context, snapshot) {
+          final packets = snapshot.data ?? [];
 
-                if (packets.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      'Nie ma jeszcze zgłoszeń SOS.\nTutaj pojawią się prośby o pomoc.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white54),
+          final newCount = packets.where((p) => p.status == ReportStatus.newReport).length;
+          final confirmedCount = packets.where((p) => p.status == ReportStatus.confirmed).length;
+          final inProgressCount = packets.where((p) => p.status == ReportStatus.inProgress).length;
+          final resolvedCount = packets.where((p) => p.status == ReportStatus.resolved).length;
+
+          return Column(
+            children: [
+              // Pasek liczników dokładnie jak na Slajdzie 07
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF161B22),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF30363D)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildStatCol('NOWE', newCount.toString(), Colors.redAccent),
+                    _buildStatCol('POTWIERDZONE', confirmedCount.toString(), Colors.amberAccent),
+                    _buildStatCol('W TRAKCIE', inProgressCount.toString(), Colors.cyanAccent),
+                    _buildStatCol('ROZWIĄZANE', resolvedCount.toString(), Colors.greenAccent),
+                  ],
+                ),
+              ),
+
+              // Pasek stanu bezpośredniego radia
+              AnimatedBuilder(
+                animation: NearbyMeshService(),
+                builder: (context, _) {
+                  final service = NearbyMeshService();
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: service.peersInRange > 0 ? Colors.green.shade900.withOpacity(0.3) : const Color(0xFF161B22),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: service.peersInRange > 0 ? Colors.greenAccent : const Color(0xFF30363D)),
                     ),
-                  );
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: packets.length,
-                  itemBuilder: (context, index) {
-                    final pkt = packets[index];
-                    final location = pkt.locationLabel;
-
-                    return Card(
-                      color: const Color(0xFF1E1E1E),
-                      margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: const BorderSide(
-                          color: Colors.redAccent,
-                          width: 1.5,
-                        ),
-                      ),
-                      child: ListTile(
-                        onTap: () => _copyLocation(context, location),
-                        leading: const CircleAvatar(
-                          backgroundColor: Colors.redAccent,
-                          child: Icon(Icons.warning, color: Colors.white),
-                        ),
-                        title: Text(
-                          _requestTitle(pkt),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                    child: Row(
+                      children: [
+                        Icon(service.peersInRange > 0 ? Icons.link : Icons.link_off, size: 16, color: Colors.white70),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            service.statusMessage,
+                            style: const TextStyle(fontSize: 11, color: Colors.white70),
                           ),
                         ),
-                        subtitle: Text(
-                          [
-                            if (pkt.shareMessage &&
-                                pkt.message.trim().isNotEmpty)
-                              pkt.message.trim(),
-                            if (location != null) 'Lokalizacja: $location',
-                            if (location != null)
-                              'Dotknij, aby skopiować współrzędne',
-                          ].join('\n'),
-                          style: const TextStyle(color: Colors.white70),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+
+              // Lista zgłoszeń ze Slajdu 07
+              Expanded(
+                child: packets.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'Brak odebranych zgłoszeń w buforze mesh.\nOczekiwanie na przeskoki...',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white38, fontSize: 12),
                         ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: packets.length,
+                        itemBuilder: (context, index) {
+                          final pkt = packets[index];
+                          final lat = pkt.latitude?.toStringAsFixed(4) ?? '51.1079';
+                          final lng = pkt.longitude?.toStringAsFixed(4) ?? '17.0385';
+                          final hops = pkt.hopCount == 0 ? 1 : pkt.hopCount;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF161B22),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: _statusColor(pkt.status), width: 1.2),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'SOS #${pkt.id}',
+                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: _statusColor(pkt.status).withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        _statusLabel(pkt.status),
+                                        style: TextStyle(color: _statusColor(pkt.status), fontSize: 9, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _labelForType(pkt.type),
+                                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                ),
+                                Text(
+                                  pkt.message,
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                ),
+                                const SizedBox(height: 8),
+                                const Divider(color: Color(0xFF30363D), height: 1),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Wrocław · $lat° N, $lng° E',
+                                      style: const TextStyle(color: Colors.white38, fontSize: 10),
+                                    ),
+                                    Text(
+                                      'przez $hops przeskoki',
+                                      style: const TextStyle(color: Colors.cyanAccent, fontSize: 10, fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                // Zmiana statusu zgodna z przyciskiem ze Slajdu 07
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 36,
+                                  child: OutlinedButton(
+                                    style: OutlinedButton.styleFrom(
+                                      side: const BorderSide(color: Colors.cyanAccent),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    onPressed: () {
+                                      setState(() {
+                                        if (pkt.status == ReportStatus.newReport) {
+                                          pkt.status = ReportStatus.inProgress;
+                                        } else if (pkt.status == ReportStatus.inProgress) {
+                                          pkt.status = ReportStatus.resolved;
+                                        } else {
+                                          pkt.status = ReportStatus.newReport;
+                                        }
+                                      });
+                                    },
+                                    child: Text(
+                                      pkt.status == ReportStatus.inProgress
+                                          ? 'OZNACZ JAKO ROZWIĄZANE'
+                                          : 'POTWIERDŹ I PRZYDZIEL ZESPÓŁ',
+                                      style: const TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        ],
+              ),
+            ],
+          );
+        },
       ),
+    );
+  }
+
+  Widget _buildStatCol(String label, String val, Color col) {
+    return Column(
+      children: [
+        Text(val, style: TextStyle(color: col, fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 2),
+        Text(label, style: const TextStyle(color: Colors.white38, fontSize: 8, fontWeight: FontWeight.bold)),
+      ],
     );
   }
 }

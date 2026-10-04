@@ -1,7 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:uuid/uuid.dart';
 import '../models/sos_packet.dart';
 import '../services/emergency_alert_service.dart';
 import '../services/mesh_engine.dart';
@@ -16,45 +16,51 @@ class SosBroadcastScreen extends StatefulWidget {
 
 class _SosBroadcastScreenState extends State<SosBroadcastScreen>
     with SingleTickerProviderStateMixin {
-  EmergencyType _selectedType = EmergencyType.medical;
+  EmergencyType _selectedType = EmergencyType.trapped;
   bool _isBroadcasting = false;
   bool _isLoadingGps = false;
+  bool _stealthMode = false;
+  bool _isAckReceived = false;
+  int _victimsCount = 2;
+  String _selectedBlood = 'A+';
   SosPacket? _activePacket;
 
-  bool _hasCustomNote = false;
-  late final TextEditingController _noteController;
+  StreamSubscription? _ackSub;
 
-  String _defaultNote(EmergencyType type) => switch (type) {
-        EmergencyType.medical => 'Potrzebuję pomocy medycznej.',
-        EmergencyType.flood => 'Zagraża mi powódź, potrzebuję pomocy.',
-        EmergencyType.trapped => 'Jestem uwięziony/a, potrzebuję pomocy w wydostaniu się.',
-        EmergencyType.fire => 'Zagraża mi pożar, potrzebuję pomocy.',
-        EmergencyType.other => 'Potrzebuję pomocy.',
-      };
-
-  void _selectType(EmergencyType type) {
-    setState(() {
-      _selectedType = type;
-      if (!_hasCustomNote) {
-        _noteController.text = _defaultNote(type);
-      }
-    });
-  }
+  final _noteController = TextEditingController(
+    text: '2 osoby uwięzione. Potrzebujemy ewakuacji.',
+  );
 
   late AnimationController _pulseController;
+
+  String _defaultNote(EmergencyType type) => switch (type) {
+        EmergencyType.medical => 'Potrzebna natychmiastowa pomoc medyczna.',
+        EmergencyType.evacuation => 'Wymagana ewakuacja z zalanego budynku.',
+        EmergencyType.supplies => 'Brak wody pitnej i żywności.',
+        EmergencyType.trapped => '2 osoby uwięzione. Potrzebujemy ewakuacji.',
+        EmergencyType.other => 'Zagrożenie życia, prosimy o kontakt ze sztabem.',
+      };
 
   @override
   void initState() {
     super.initState();
-    _noteController = TextEditingController(text: _defaultNote(_selectedType));
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
+
+    _ackSub = MeshNodeService().ackStream.listen((ack) {
+      if (_isBroadcasting && _activePacket != null && ack.id == _activePacket!.id) {
+        setState(() {
+          _isAckReceived = true;
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _ackSub?.cancel();
     _pulseController.dispose();
     _noteController.dispose();
     EmergencyAlertService().stopAlarm();
@@ -85,6 +91,7 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
       EmergencyAlertService().stopAlarm();
       setState(() {
         _isBroadcasting = false;
+        _isAckReceived = false;
         _activePacket = null;
       });
       return;
@@ -104,28 +111,57 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
     if (!mounted) return;
 
     final packet = SosPacket(
-      id: const Uuid().v4().substring(0, 8),
-      senderName: 'WĘZEŁ_ALPHA',
+      id: '1842',
+      senderName: 'POSZKODOWANY_01',
       type: _selectedType,
       message: _noteController.text.trim(),
       latitude: lat,
       longitude: lng,
       timestamp: DateTime.now(),
       hopCount: 0,
+      bloodType: _selectedBlood,
+      victimsCount: _victimsCount,
     );
 
     await MeshNodeService().broadcastMySos(packet);
-    EmergencyAlertService().startAlarm();
+
+    if (!_stealthMode) {
+      EmergencyAlertService().startAlarm();
+    }
 
     setState(() {
       _isLoadingGps = false;
       _isBroadcasting = true;
+      _isAckReceived = false;
       _activePacket = packet;
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_stealthMode && _isBroadcasting) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: InkWell(
+          onTap: () => setState(() => _stealthMode = false),
+          child: const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.shield_moon, color: Colors.white24, size: 40),
+                SizedBox(height: 12),
+                Text(
+                  'TRYB CZARNY (STEALTH MESH AKTYWNY)\nDotknij ekranu, aby przywrócić interfejs',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white24, fontSize: 11, letterSpacing: 1.2),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF0D0F12),
       appBar: AppBar(
@@ -149,138 +185,171 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
             ),
             const SizedBox(width: 10),
             const Text(
-              'RESQUE // TACTICAL SOS',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+              'RESQUE // TRYB OFFLINE · MESH',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 1.5),
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Tryb Cichy / Stealth',
+            icon: Icon(
+              _stealthMode ? Icons.visibility_off : Icons.visibility,
+              color: _stealthMode ? Colors.amberAccent : Colors.white60,
+            ),
+            onPressed: () {
+              setState(() => _stealthMode = !_stealthMode);
+              if (_stealthMode && _isBroadcasting) {
+                EmergencyAlertService().stopAlarm();
+              }
+            },
+          ),
+        ],
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           children: [
-            // Pasek telemetrii
-            _buildTelemetryBar(),
-            const SizedBox(height: 16),
-
-            // Przyciski wyboru typu zagrożenia
-            const Text(
-              'RODZAJ ZAGROŻENIA:',
-              style: TextStyle(color: Colors.white54, fontSize: 11, letterSpacing: 1.2),
-            ),
-            const SizedBox(height: 8),
-            _buildTacticalChips(),
-            const SizedBox(height: 16),
-
-            // Pole krótkiego komunikatu
-            TextField(
-              controller: _noteController,
-              onChanged: (_) => _hasCustomNote = true,
-              enabled: !_isBroadcasting,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              decoration: InputDecoration(
-                labelText: 'OPIS ZAGROŻENIA',
-                labelStyle: const TextStyle(color: Colors.white38, fontSize: 11),
-                filled: true,
-                fillColor: const Color(0xFF161B22),
-                border: OutlineInputBorder(
+            if (_isAckReceived) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.greenAccent.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF30363D)),
+                  border: Border.all(color: Colors.greenAccent, width: 1.5),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF30363D)),
+                child: const Row(
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.greenAccent, size: 28),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('ZGŁOSZENIE #1842 PRZYJĘTE',
+                              style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                          Text('ZESPÓŁ RATUNKOWY W TRAKCIE · POMOC W DRODZE',
+                              style: TextStyle(color: Colors.white, fontSize: 11)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
+            ],
+            _buildAutoMetadataBar(),
+            const SizedBox(height: 12),
+            const Text(
+              'CZEGO POTRZEBUJESZ?',
+              style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2),
             ),
-            const SizedBox(height: 24),
-
-            // Wielki Tactical Przycisk SOS
+            const SizedBox(height: 8),
+            _buildNeedChips(),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _noteController,
+              enabled: !_isBroadcasting,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+              decoration: InputDecoration(
+                labelText: 'MELDUNEK TAKTYCZNY',
+                labelStyle: const TextStyle(color: Colors.white38, fontSize: 10),
+                filled: true,
+                fillColor: const Color(0xFF161B22),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF30363D))),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF30363D))),
+              ),
+            ),
+            const SizedBox(height: 16),
             _buildBigTacticalButton(),
-            const SizedBox(height: 20),
-
-            // Karta dla osób bez aplikacji (Optyczny kod QR)
+            const SizedBox(height: 16),
             if (_isBroadcasting && _activePacket != null) ...[
               _buildQrBroadcastCard(_activePacket!),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
             ],
-
             _buildDirectMeshStatusBar(),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildTelemetryBar() {
+  Widget _buildAutoMetadataBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF161B22),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFF30363D)),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _telemetryItem(Icons.satellite_outlined, 'GPS OFFLINE', Colors.amberAccent),
-          _telemetryItem(Icons.bluetooth_audio, 'BLE MESH', Colors.cyanAccent),
-          _telemetryItem(Icons.shield_outlined, 'STORE & FWD', Colors.greenAccent),
+          Text(
+            'AUTOMATYCZNIE DODAWANE DO PAKIETU:',
+            style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1.1),
+          ),
+          SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('LOKALIZACJA: 51.1079° N, 17.0385° E', style: TextStyle(color: Colors.amberAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+              Text('PRIORYTET: KRYTYCZNY', style: TextStyle(color: Colors.redAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _telemetryItem(IconData icon, String text, Color col) {
-    return Row(
-      children: [
-        Icon(icon, size: 15, color: col),
-        const SizedBox(width: 6),
-        Text(text, style: TextStyle(color: col, fontSize: 10, fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
-
-  Widget _buildTacticalChips() {
+  Widget _buildNeedChips() {
     final types = [
-      (EmergencyType.medical, 'MEDYCZNE', Icons.medical_services),
-      (EmergencyType.flood, 'POWÓDŹ', Icons.flood),
-      (EmergencyType.trapped, 'UWIĘZIENIE', Icons.warning_amber),
-      (EmergencyType.fire, 'POŻAR', Icons.local_fire_department),
+      (EmergencyType.medical, 'POMOC MEDYCZNA', Icons.medical_services),
+      (EmergencyType.evacuation, 'EWAKUACJA', Icons.directions_run),
+      (EmergencyType.supplies, 'ŻYWNOŚĆ / WODA', Icons.water_drop),
+      (EmergencyType.trapped, 'JESTEM UWIĘZIONY', Icons.warning_amber),
+      (EmergencyType.other, 'INNE', Icons.more_horiz),
     ];
 
-    return Row(
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
       children: types.map((item) {
         final isSelected = _selectedType == item.$1;
-        return Expanded(
-          child: GestureDetector(
-            onTap: _isBroadcasting ? null : () => _selectType(item.$1),
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFFFF2A4B).withOpacity(0.2) : const Color(0xFF161B22),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: isSelected ? const Color(0xFFFF2A4B) : const Color(0xFF30363D),
-                  width: isSelected ? 1.5 : 1,
-                ),
+        return GestureDetector(
+          onTap: _isBroadcasting
+              ? null
+              : () {
+                  setState(() {
+                    _selectedType = item.$1;
+                    _noteController.text = _defaultNote(item.$1);
+                  });
+                },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: isSelected ? const Color(0xFFFF2A4B).withOpacity(0.2) : const Color(0xFF161B22),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isSelected ? const Color(0xFFFF2A4B) : const Color(0xFF30363D),
+                width: isSelected ? 1.5 : 1,
               ),
-              child: Column(
-                children: [
-                  Icon(item.$3, size: 16, color: isSelected ? const Color(0xFFFF2A4B) : Colors.white60),
-                  const SizedBox(height: 4),
-                  Text(
-                    item.$2,
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                      color: isSelected ? Colors.white : Colors.white60,
-                    ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(item.$3, size: 14, color: isSelected ? const Color(0xFFFF2A4B) : Colors.white60),
+                const SizedBox(width: 6),
+                Text(
+                  item.$2,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: isSelected ? Colors.white : Colors.white60,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         );
@@ -289,94 +358,105 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
   }
 
   Widget _buildBigTacticalButton() {
-    return Center(
-      child: GestureDetector(
-        onTap: _isLoadingGps ? null : _triggerSos,
-        child: AnimatedBuilder(
-          animation: _pulseController,
-          builder: (context, child) {
-            final scale = _isBroadcasting ? 1.0 + (0.05 * _pulseController.value) : 1.0;
-            return Transform.scale(
-              scale: scale,
-              child: Container(
-                width: 175,
-                height: 175,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _isBroadcasting ? const Color(0xFFFF2A4B) : const Color(0xFF1F242C),
-                  border: Border.all(
-                    color: _isBroadcasting ? Colors.white : const Color(0xFFFF2A4B),
-                    width: 3,
+    return Column(
+      children: [
+        GestureDetector(
+          onLongPress: _isLoadingGps ? null : _triggerSos,
+          onTap: _isBroadcasting ? _triggerSos : null,
+          child: AnimatedBuilder(
+            animation: _pulseController,
+            builder: (context, child) {
+              final scale = _isBroadcasting ? 1.0 + (0.04 * _pulseController.value) : 1.0;
+              return Transform.scale(
+                scale: scale,
+                child: Container(
+                  width: 155,
+                  height: 155,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _isBroadcasting ? const Color(0xFFFF2A4B) : const Color(0xFF1F242C),
+                    border: Border.all(
+                      color: _isBroadcasting ? Colors.white : const Color(0xFFFF2A4B),
+                      width: 3,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFF2A4B).withOpacity(_isBroadcasting ? 0.6 : 0.2),
+                        blurRadius: _isBroadcasting ? 26 : 8,
+                        spreadRadius: _isBroadcasting ? 6 : 1,
+                      )
+                    ],
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFFF2A4B).withOpacity(_isBroadcasting ? 0.6 : 0.2),
-                      blurRadius: _isBroadcasting ? 30 : 10,
-                      spreadRadius: _isBroadcasting ? 8 : 1,
-                    )
-                  ],
-                ),
-                child: Center(
-                  child: _isLoadingGps
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              _isBroadcasting ? Icons.flashlight_on : Icons.crisis_alert,
-                              size: 48,
-                              color: Colors.white,
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              _isBroadcasting ? 'PRZERWIJ' : 'NADAJ SOS',
-                              style: const TextStyle(
+                  child: Center(
+                    child: _isLoadingGps
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                _isBroadcasting ? Icons.radar : Icons.crisis_alert,
+                                size: 40,
                                 color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                                letterSpacing: 1.5,
                               ),
-                            ),
-                          ],
-                        ),
+                              const SizedBox(height: 6),
+                              Text(
+                                _isBroadcasting ? 'PRZERWIJ' : 'SOS',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  letterSpacing: 2,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        Text(
+          _isBroadcasting ? 'NADAWANIE W SIECI MESH...' : 'przytrzymaj, aby wysłać',
+          style: TextStyle(
+            color: _isBroadcasting ? Colors.redAccent : Colors.white38,
+            fontSize: 10,
+            letterSpacing: 1.1,
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildQrBroadcastCard(SosPacket pkt) {
     final lat = pkt.latitude?.toStringAsFixed(4) ?? 'n/a';
     final lng = pkt.longitude?.toStringAsFixed(4) ?? 'n/a';
-    final geoLink = 'geo:$lat,$lng?q=$lat,$lng(SOS+Pomoc)';
+    final geoLink = 'geo:$lat,$lng?q=$lat,$lng(SOS+Resque+#${pkt.id})';
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         children: [
           const Text(
-            'OPTYCZNY SYGNAŁ RATUNKOWY (DLA KAMER BEZ APKI)',
-            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11),
+            'OPTYCZNY SYGNAŁ RATUNKOWY (DLA DRONÓW I SŁUŻB)',
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           QrImageView(
             data: geoLink,
             version: QrVersions.auto,
-            size: 150.0,
+            size: 130.0,
             backgroundColor: Colors.white,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Text(
-            'KOORDYNATY: $lat, $lng\nLATARKA NADAJE SOS MORSE\'EM',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.black87, fontSize: 11, fontWeight: FontWeight.bold),
+            'ID: #${pkt.id} · WROCŁAW · $lat, $lng',
+            style: const TextStyle(color: Colors.black87, fontSize: 10, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -390,7 +470,7 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
         final service = NearbyMeshService();
         final count = service.peersInRange;
         return Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: const Color(0xFF161B22),
             borderRadius: BorderRadius.circular(12),
@@ -401,12 +481,9 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
             children: [
               Row(
                 children: [
-                  const Icon(Icons.leak_add, color: Colors.cyanAccent, size: 18),
+                  const Icon(Icons.leak_add, color: Colors.cyanAccent, size: 16),
                   const SizedBox(width: 8),
-                  Text(
-                    'Aktywne węzły BLE: $count',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
+                  Text('Węzły w zasięgu bezpośrednim: $count', style: const TextStyle(color: Colors.white70, fontSize: 11)),
                 ],
               ),
               Container(
@@ -416,10 +493,10 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  count > 0 ? 'M-MESH ONLINE' : 'AUTONOMICZNY',
+                  count > 0 ? 'MESH LINK OK' : 'AUTONOMICZNY',
                   style: TextStyle(
                     color: count > 0 ? Colors.greenAccent : Colors.white38,
-                    fontSize: 10,
+                    fontSize: 9,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
