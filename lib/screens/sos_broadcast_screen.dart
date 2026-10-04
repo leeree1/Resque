@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:torch_light/torch_light.dart';
 import '../models/sos_packet.dart';
 import '../services/emergency_alert_service.dart';
 import '../services/mesh_engine.dart';
@@ -24,11 +25,14 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
   bool _isLoadingGps = false;
   bool _stealthMode = false;
   bool _isAckReceived = false;
-  int _victimsCount = 2;
-  String _selectedBlood = 'A+';
+  bool _isFlashlightStrobeActive = false;
+  bool _simulatedBlackoutActive = true; // Zgodnie ze Slajdem 01: domyślnie blackout
+  final int _victimsCount = 2;
+  final String _selectedBlood = 'A+';
   SosPacket? _activePacket;
 
   StreamSubscription? _ackSub;
+  Timer? _strobeTimer;
 
   final _noteController = TextEditingController(
     text: '2 osoby uwięzione. Potrzebujemy ewakuacji.',
@@ -63,11 +67,40 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
 
   @override
   void dispose() {
+    _stopStrobe();
     _ackSub?.cancel();
     _pulseController.dispose();
     _noteController.dispose();
     EmergencyAlertService().stopAlarm();
     super.dispose();
+  }
+
+  void _startStrobe() async {
+    _isFlashlightStrobeActive = true;
+    bool isOn = false;
+    _strobeTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
+      try {
+        if (!_isFlashlightStrobeActive) return;
+        if (isOn) {
+          await TorchLight.disableTorch();
+          isOn = false;
+        } else {
+          await TorchLight.enableTorch();
+          isOn = true;
+        }
+      } catch (_) {
+        // Ignoruj na platformach bez wsparcia lampy (np. Chrome/Web)
+      }
+    });
+  }
+
+  void _stopStrobe() async {
+    _isFlashlightStrobeActive = false;
+    _strobeTimer?.cancel();
+    _strobeTimer = null;
+    try {
+      await TorchLight.disableTorch();
+    } catch (_) {}
   }
 
   Future<Position?> _determinePosition() async {
@@ -92,6 +125,7 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
   void _triggerSos() async {
     if (_isBroadcasting) {
       EmergencyAlertService().stopAlarm();
+      _stopStrobe();
       setState(() {
         _isBroadcasting = false;
         _isAckReceived = false;
@@ -130,6 +164,7 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
 
     if (!_stealthMode) {
       EmergencyAlertService().startAlarm();
+      _startStrobe();
     }
 
     setState(() {
@@ -186,10 +221,10 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
               height: 10,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _isBroadcasting ? Colors.redAccent : Colors.greenAccent,
+                color: _isBroadcasting ? const Color(0xFFFF2A4B) : const Color(0xFF00E676),
                 boxShadow: [
                   BoxShadow(
-                    color: _isBroadcasting ? Colors.redAccent : Colors.greenAccent,
+                    color: _isBroadcasting ? const Color(0xFFFF2A4B) : const Color(0xFF00E676),
                     blurRadius: 6,
                   )
                 ],
@@ -207,12 +242,13 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
             tooltip: 'Tryb Cichy / Stealth',
             icon: Icon(
               _stealthMode ? Icons.visibility_off : Icons.visibility,
-              color: _stealthMode ? Colors.amberAccent : Colors.white60,
+              color: _stealthMode ? const Color(0xFFFFB300) : Colors.white60,
             ),
             onPressed: () {
               setState(() => _stealthMode = !_stealthMode);
-              if (_stealthMode && _isBroadcasting) {
+              if (_stealthMode) {
                 EmergencyAlertService().stopAlarm();
+                _stopStrobe();
               }
             },
           ),
@@ -222,25 +258,30 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
         child: ListView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           children: [
+            // Pasek Katastrofy / Blackoutu ze Slajdu 01 i 02
+            _buildInfrastructureStatusBar(),
+            const SizedBox(height: 10),
+
+            // Otrzymany ACK (Potwierdzenie dotarcia zgłoszenia)
             if (_isAckReceived) ...[
               Container(
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.greenAccent.withOpacity(0.15),
+                  color: const Color(0xFF00E676).withOpacity(0.15),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.greenAccent, width: 1.5),
+                  border: Border.all(color: const Color(0xFF00E676), width: 1.5),
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.check_circle, color: Colors.greenAccent, size: 28),
+                    Icon(Icons.check_circle, color: Color(0xFF00E676), size: 28),
                     SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('ZGŁOSZENIE #1842 PRZYJĘTE',
-                              style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                              style: TextStyle(color: Color(0xFF00E676), fontWeight: FontWeight.bold, fontSize: 12)),
                           Text('ZESPÓŁ RATUNKOWY W TRAKCIE · POMOC W DRODZE',
                               style: TextStyle(color: Colors.white, fontSize: 11)),
                         ],
@@ -250,8 +291,12 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
                 ),
               ),
             ],
+
+            // Panel Telemetrii ze Slajdu 04
             _buildAutoMetadataBar(),
             const SizedBox(height: 12),
+
+            // Pytanie ze Slajdu 04: "Czego potrzebujesz?"
             const Text(
               'CZEGO POTRZEBUJESZ?',
               style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2),
@@ -259,6 +304,8 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
             const SizedBox(height: 8),
             _buildNeedChips(),
             const SizedBox(height: 12),
+
+            // Meldunek taktyczny
             TextField(
               controller: _noteController,
               enabled: !_isBroadcasting,
@@ -273,17 +320,75 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
               ),
             ),
             const SizedBox(height: 16),
+
+            // Główny Przycisk SOS (Z podpisem "przytrzymaj, aby wysłać")
             _buildBigTacticalButton(),
             const SizedBox(height: 16),
+
+            // Kod QR dla dronów ratunkowych
             if (_isBroadcasting && _activePacket != null) ...[
               _buildQrBroadcastCard(_activePacket!),
               const SizedBox(height: 14),
             ],
+
             _buildDirectMeshStatusBar(),
             const SizedBox(height: 12),
           ],
         ),
       ),
+    );
+  }
+
+  // Odzwierciedlenie Slajdu 01 i 02: Stan łączności tradycyjnej vs Mesh
+  Widget _buildInfrastructureStatusBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF30363D)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              _buildBadge('GSM', _simulatedBlackoutActive ? 'OFFLINE' : 'ONLINE',
+                  _simulatedBlackoutActive ? const Color(0xFFFF2A4B) : const Color(0xFF00E676)),
+              const SizedBox(width: 6),
+              _buildBadge('INTERNET', _simulatedBlackoutActive ? 'OFFLINE' : 'ONLINE',
+                  _simulatedBlackoutActive ? const Color(0xFFFF2A4B) : const Color(0xFF00E676)),
+              const SizedBox(width: 6),
+              _buildBadge('MESH', 'AKTYWNY', const Color(0xFF00E5FF)),
+            ],
+          ),
+          GestureDetector(
+            onTap: () {
+              setState(() => _simulatedBlackoutActive = !_simulatedBlackoutActive);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                _simulatedBlackoutActive ? 'SYMULACJA: POWÓDŹ' : 'TRYB: STANDARD',
+                style: const TextStyle(fontSize: 8, color: Colors.white70, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBadge(String label, String status, Color col) {
+    return Row(
+      children: [
+        Text('$label: ', style: const TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.bold)),
+        Text(status, style: TextStyle(color: col, fontSize: 9, fontWeight: FontWeight.bold)),
+      ],
     );
   }
 
@@ -303,12 +408,11 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
             style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1.1),
           ),
           SizedBox(height: 6),
-          Wrap(
-            spacing: 12,
-            runSpacing: 6,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('LOKALIZACJA: 51.1079° N, 17.0385° E', style: TextStyle(color: Colors.amberAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-              Text('PRIORYTET: KRYTYCZNY', style: TextStyle(color: Colors.redAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+              Text('LOKALIZACJA: 51.1079° N, 17.0385° E', style: TextStyle(color: Color(0xFFFFB300), fontSize: 10, fontWeight: FontWeight.bold)),
+              Text('PRIORYTET: KRYTYCZNY', style: TextStyle(color: Color(0xFFFF2A4B), fontSize: 10, fontWeight: FontWeight.bold)),
             ],
           ),
         ],
@@ -431,9 +535,9 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
         ),
         const SizedBox(height: 8),
         Text(
-          _isBroadcasting ? 'NADAWANIE W SIECI MESH...' : 'przytrzymaj, aby wysłać',
+          _isBroadcasting ? 'NADAWANIE W SIECI MESH... (STROBOSKOP + DŹWIĘK)' : 'przytrzymaj, aby wysłać',
           style: TextStyle(
-            color: _isBroadcasting ? Colors.redAccent : Colors.white38,
+            color: _isBroadcasting ? const Color(0xFFFF2A4B) : Colors.white38,
             fontSize: 10,
             letterSpacing: 1.1,
           ),
@@ -494,7 +598,7 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
             children: [
               Row(
                 children: [
-                  const Icon(Icons.leak_add, color: Colors.cyanAccent, size: 16),
+                  const Icon(Icons.leak_add, color: Color(0xFF00E5FF), size: 16),
                   const SizedBox(width: 8),
                   Text('Węzły w zasięgu bezpośrednim: $count', style: const TextStyle(color: Colors.white70, fontSize: 11)),
                 ],
@@ -502,13 +606,13 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: count > 0 ? Colors.greenAccent.withOpacity(0.2) : Colors.white10,
+                  color: count > 0 ? const Color(0xFF00E676).withOpacity(0.2) : Colors.white10,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   count > 0 ? 'MESH LINK OK' : 'AUTONOMICZNY',
                   style: TextStyle(
-                    color: count > 0 ? Colors.greenAccent : Colors.white38,
+                    color: count > 0 ? const Color(0xFF00E676) : Colors.white38,
                     fontSize: 9,
                     fontWeight: FontWeight.bold,
                   ),
