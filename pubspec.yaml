@@ -23,6 +23,10 @@ dependencies:
   permission_handler: ^13.0.2
   shared_preferences: ^2.5.5
 
+dependency_overrides:
+  torch_light:
+    path: packages/torch_light
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
