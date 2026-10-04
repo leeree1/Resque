@@ -10,6 +10,9 @@ import '../services/nearby_mesh_service.dart';
 class SosBroadcastScreen extends StatefulWidget {
   const SosBroadcastScreen({super.key});
 
+  static String? customNote;
+  static EmergencyType? customType;
+
   @override
   State<SosBroadcastScreen> createState() => _SosBroadcastScreenState();
 }
@@ -139,6 +142,15 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (SosBroadcastScreen.customNote != null) {
+      _noteController.text = SosBroadcastScreen.customNote!;
+      if (SosBroadcastScreen.customType != null) {
+        _selectedType = SosBroadcastScreen.customType!;
+      }
+      SosBroadcastScreen.customNote = null;
+      SosBroadcastScreen.customType = null;
+    }
+
     if (_stealthMode && _isBroadcasting) {
       return Scaffold(
         backgroundColor: Colors.black,

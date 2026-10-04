@@ -1,27 +1,38 @@
 import 'dart:async';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'firebase_options.dart';
 import 'screens/sos_broadcast_screen.dart';
 import 'screens/relay_monitor_screen.dart';
-import 'screens/radar_screen.dart';
 import 'screens/map_offline_screen.dart';
 import 'screens/first_aid_screen.dart';
 import 'services/mesh_engine.dart';
 import 'services/nearby_mesh_service.dart';
-import 'services/firebase_sync_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   MeshNodeService();
   runApp(const ResqueApp());
   unawaited(NearbyMeshService().start());
+}
 
-  // Okresowa synchronizacja bufora z Firebase (co 60 s)
-  Timer.periodic(const Duration(minutes: 1), (_) {
-    FirebaseSyncService.trySyncInBackground();
-  });
+/// Globalny kontroler przełączania zakładek w aplikacji
+class TacticalNavController {
+  static final ValueNotifier<int> currentTab = ValueNotifier<int>(0);
+
+  static void switchToSos({String? initialMessage}) {
+    currentTab.value = 0;
+  }
+
+  static void switchToRadar() {
+    currentTab.value = 1;
+  }
+
+  static void switchToSztab() {
+    currentTab.value = 2;
+  }
+
+  static void switchToApteczka() {
+    currentTab.value = 3;
+  }
 }
 
 class ResqueApp extends StatelessWidget {
@@ -57,62 +68,59 @@ class TacticalRootNavigation extends StatefulWidget {
 }
 
 class _TacticalRootNavigationState extends State<TacticalRootNavigation> {
-  int _currentIndex = 0;
-
   final List<Widget> _screens = const [
     SosBroadcastScreen(),
     RelayMonitorScreen(),
-    RadarScreen(),
     MapOfflineScreen(),
     FirstAidScreen(),
   ];
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
-      ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: Color(0xFF30363D), width: 1)),
-        ),
-        child: NavigationBar(
-          height: 68,
-          selectedIndex: _currentIndex,
-          onDestinationSelected: (idx) => setState(() => _currentIndex = idx),
-          backgroundColor: const Color(0xFF0D0F12),
-          indicatorColor: const Color(0xFFFF2A4B).withOpacity(0.2),
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.emergency_outlined, color: Colors.white60),
-              selectedIcon: Icon(Icons.emergency, color: Color(0xFFFF2A4B)),
-              label: 'NADAJNIK',
+    return ValueListenableBuilder<int>(
+      valueListenable: TacticalNavController.currentTab,
+      builder: (context, activeIndex, _) {
+        return Scaffold(
+          body: IndexedStack(
+            index: activeIndex,
+            children: _screens,
+          ),
+          bottomNavigationBar: Container(
+            decoration: const BoxDecoration(
+              border: Border(top: BorderSide(color: Color(0xFF30363D), width: 1)),
             ),
-            NavigationDestination(
-              icon: Icon(Icons.hub_outlined, color: Colors.white60),
-              selectedIcon: Icon(Icons.hub, color: Color(0xFF00E5FF)),
-              label: 'WĘZEŁ',
+            child: NavigationBar(
+              height: 68,
+              selectedIndex: activeIndex,
+              onDestinationSelected: (idx) => TacticalNavController.currentTab.value = idx,
+              backgroundColor: const Color(0xFF0D0F12),
+              indicatorColor: const Color(0xFFFF2A4B).withOpacity(0.2),
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.emergency_outlined, color: Colors.white60),
+                  selectedIcon: Icon(Icons.emergency, color: Color(0xFFFF2A4B)),
+                  label: 'SOS',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.radar_outlined, color: Colors.white60),
+                  selectedIcon: Icon(Icons.radar, color: Color(0xFF00E5FF)),
+                  label: 'RADAR',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.map_outlined, color: Colors.white60),
+                  selectedIcon: Icon(Icons.map, color: Colors.amberAccent),
+                  label: 'SZTAB',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.medical_services_outlined, color: Colors.white60),
+                  selectedIcon: Icon(Icons.medical_services, color: Colors.redAccent),
+                  label: 'APTECZKA',
+                ),
+              ],
             ),
-            NavigationDestination(
-              icon: Icon(Icons.radar_outlined, color: Colors.white60),
-              selectedIcon: Icon(Icons.radar, color: Colors.greenAccent),
-              label: 'RADAR',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.map_outlined, color: Colors.white60),
-              selectedIcon: Icon(Icons.map, color: Colors.amberAccent),
-              label: 'SZTAB',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.medical_services_outlined, color: Colors.white60),
-              selectedIcon: Icon(Icons.medical_services, color: Colors.redAccent),
-              label: 'APTECZKA',
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

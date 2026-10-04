@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../main.dart';
 import '../models/sos_packet.dart';
 import '../services/mesh_engine.dart';
 import '../services/nearby_mesh_service.dart';
@@ -58,7 +59,7 @@ class _RelayMonitorScreenState extends State<RelayMonitorScreen> {
       backgroundColor: const Color(0xFF0D0F12),
       appBar: AppBar(
         title: const Text(
-          'RESQUE · CENTRUM KOORDYNACJI',
+          'RESQUE · RADAR PAKIETÓW',
           style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 1.2),
         ),
         backgroundColor: Colors.transparent,
@@ -77,7 +78,6 @@ class _RelayMonitorScreenState extends State<RelayMonitorScreen> {
 
           return Column(
             children: [
-              // Pasek liczników dokładnie jak na Slajdzie 07
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 padding: const EdgeInsets.all(12),
@@ -96,8 +96,6 @@ class _RelayMonitorScreenState extends State<RelayMonitorScreen> {
                   ],
                 ),
               ),
-
-              // Pasek stanu bezpośredniego radia
               AnimatedBuilder(
                 animation: NearbyMeshService(),
                 builder: (context, _) {
@@ -126,8 +124,6 @@ class _RelayMonitorScreenState extends State<RelayMonitorScreen> {
                 },
               ),
               const SizedBox(height: 8),
-
-              // Lista zgłoszeń ze Slajdu 07
               Expanded(
                 child: packets.isEmpty
                     ? const Center(
@@ -203,33 +199,48 @@ class _RelayMonitorScreenState extends State<RelayMonitorScreen> {
                                   ],
                                 ),
                                 const SizedBox(height: 10),
-                                // Zmiana statusu zgodna z przyciskiem ze Slajdu 07
-                                SizedBox(
-                                  width: double.infinity,
-                                  height: 36,
-                                  child: OutlinedButton(
-                                    style: OutlinedButton.styleFrom(
-                                      side: const BorderSide(color: Colors.cyanAccent),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        style: OutlinedButton.styleFrom(
+                                          side: const BorderSide(color: Colors.amberAccent),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                        onPressed: () {
+                                          TacticalNavController.switchToSztab();
+                                        },
+                                        icon: const Icon(Icons.explore, size: 14, color: Colors.amberAccent),
+                                        label: const Text('SZTAB / MAPA', style: TextStyle(color: Colors.amberAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                                      ),
                                     ),
-                                    onPressed: () {
-                                      setState(() {
-                                        if (pkt.status == ReportStatus.newReport) {
-                                          pkt.status = ReportStatus.inProgress;
-                                        } else if (pkt.status == ReportStatus.inProgress) {
-                                          pkt.status = ReportStatus.resolved;
-                                        } else {
-                                          pkt.status = ReportStatus.newReport;
-                                        }
-                                      });
-                                    },
-                                    child: Text(
-                                      pkt.status == ReportStatus.inProgress
-                                          ? 'OZNACZ JAKO ROZWIĄZANE'
-                                          : 'POTWIERDŹ I PRZYDZIEL ZESPÓŁ',
-                                      style: const TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        style: OutlinedButton.styleFrom(
+                                          side: const BorderSide(color: Colors.cyanAccent),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                        onPressed: () {
+                                          setState(() {
+                                            if (pkt.status == ReportStatus.newReport) {
+                                              pkt.status = ReportStatus.inProgress;
+                                            } else if (pkt.status == ReportStatus.inProgress) {
+                                              pkt.status = ReportStatus.resolved;
+                                            } else {
+                                              pkt.status = ReportStatus.newReport;
+                                            }
+                                          });
+                                        },
+                                        child: Text(
+                                          pkt.status == ReportStatus.inProgress
+                                              ? 'ROZWIĄZANE'
+                                              : 'POTWIERDŹ',
+                                          style: const TextStyle(color: Colors.cyanAccent, fontSize: 10, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                  ],
                                 ),
                               ],
                             ),
