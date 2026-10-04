@@ -303,8 +303,9 @@ class _SosBroadcastScreenState extends State<SosBroadcastScreen>
             style: TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1.1),
           ),
           SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            spacing: 12,
+            runSpacing: 6,
             children: [
               Text('LOKALIZACJA: 51.1079° N, 17.0385° E', style: TextStyle(color: Colors.amberAccent, fontSize: 10, fontWeight: FontWeight.bold)),
               Text('PRIORYTET: KRYTYCZNY', style: TextStyle(color: Colors.redAccent, fontSize: 10, fontWeight: FontWeight.bold)),
